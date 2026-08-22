@@ -241,8 +241,10 @@ def _axis_words(rows: int, cols: int) -> tuple[tuple[str, ...], tuple[str, ...]]
     """
     dims = SimpleNamespace(region_rows=max(int(rows), 1),
                            region_cols=max(int(cols), 1))
-    row_words = tuple(_region_parts(r, 0, dims)[0] for r in range(max(rows, 0)))
-    col_words = tuple(_region_parts(0, c, dims)[1] for c in range(max(cols, 0)))
+    row_words = tuple(_region_parts(r, 0, dims)[0]
+                      for r in range(max(rows, 0)))
+    col_words = tuple(_region_parts(0, c, dims)[1]
+                      for c in range(max(cols, 0)))
     return row_words, col_words
 
 
@@ -281,12 +283,10 @@ def _paint_title(p: QPainter, pal, title: str, width: int) -> float:
 
 def _paint_empty(p: QPainter, pal, rect: QRectF, text: str) -> None:
     p.setFont(theme.mono(12))
-    # NO setAlphaF here. `fg_dim` is already bisected to DIM_CONTRAST
-    # (4.5:1) by the palette fitter; knocking 25% off it threw ~2 contrast
-    # points away and landed this text at 3.10-3.53:1 — 22-31%% under the floor,
-    # at normal-text size. The caption 40px below, same colour, no alpha,
-    # measured 4.63-5.47:1 in the same render.
-    p.setPen(QColor(pal.fg_dim))
+    # Use the main foreground here. Chinese fallback glyphs have softer
+    # antialiasing than the Latin monospace face, so fg_dim's nominal 4.5:1
+    # can render below the normal-text floor even at full opacity.
+    p.setPen(QColor(pal.fg))
     p.drawText(rect, Qt.AlignCenter, f"· {text} ·")
 
 
@@ -646,20 +646,20 @@ class AsciiBars(_Ignite, QWidget):
         hi = self._values[order[0]]
         lab = self._label_at(order[0], "top")
         if len(self._values) < 2:
-            return f"{lab} {_fmt_value('{:.2f}', hi)} — one direction measured"
+            return f"{lab} {_fmt_value('{:.2f}', hi)} — 仅测得一个方向"
         nxt = self._values[order[1]]
         lab2 = self._label_at(order[1], "next")
         if all(prints_zero(v) for v in self._values):
-            return "every bar is 0.00 — no cost recorded to compare"
+            return "所有方向均为 0.00 — 没有可供比较的代价"
         if hi <= 0:
             # Every bar NEGATIVE is not every bar zero: the value column prints
             # -0.20 / -0.10 / -0.30 beside this line, and "every bar is 0.00"
             # contradicted every numeral on the panel.
-            return (f"no bar is above zero — {lab} "
-                    f"{_fmt_value('{:.2f}', hi)} is the highest")
+            return (f"没有方向高于 0 — {lab}的 "
+                    f"{_fmt_value('{:.2f}', hi)} 已是最高值")
         if nxt <= 0 or prints_zero(nxt):
-            return f"{lab} {hi:.2f} is the only bar above zero"
-        return f"top two: {lab} {hi:.2f} / {lab2} {nxt:.2f} = {hi / nxt:.2f}x"
+            return f"只有{lab}高于 0：{hi:.2f}"
+        return f"最高两项：{lab} {hi:.2f} / {lab2} {nxt:.2f} = {hi / nxt:.2f} 倍"
 
     def _cited_counts(self) -> list[int]:
         """The sample counts behind the bars the footer sentence NAMES: the top
@@ -703,7 +703,7 @@ class AsciiBars(_Ignite, QWidget):
         w, h = self.width(), self.height()
         top = _paint_title(p, pal, self._title, w)
         if not self._values:
-            _paint_empty(p, pal, QRectF(0, top, w, h - top), "waiting for flick data")
+            _paint_empty(p, pal, QRectF(0, top, w, h - top), "等待甩枪数据")
             return
 
         n = len(self._values)
@@ -972,8 +972,8 @@ class AsciiHeatmap(_Ignite, QWidget):
         if seen == total:
             return ""
         if seen == 0:
-            return f"no zone measured this run — all {total} drawn hollow"
-        return f"{seen} of {total} zones measured — the rest are drawn hollow"
+            return f"本局未测得任何区域 — {total} 个区域全部以空心显示"
+        return f"已测量 {seen}/{total} 个区域 — 其余区域以空心显示"
 
     def spread_note(self) -> str:
         """Why every zone is the same shade, when the spread is too narrow to
@@ -985,9 +985,8 @@ class AsciiHeatmap(_Ignite, QWidget):
         lo_v, hi_v, _span = ends
         # Kept short on purpose: it shares one footer line with coverage_note,
         # and both together have to fit a chart column before elision starts.
-        return (f"measured zones {self._fmt.format(lo_v)}"
-                f"..{self._fmt.format(hi_v)} — too narrow to shade; "
-                f"the numbers carry it")
+        return (f"已测区域范围 {self._fmt.format(lo_v)}"
+                f"..{self._fmt.format(hi_v)} — 差异过小，不用颜色区分；以数字为准")
 
     def footer_note(self) -> str:
         """The whole footer sentence: what was measured, and why it is flat if
@@ -1052,7 +1051,7 @@ class AsciiHeatmap(_Ignite, QWidget):
         label = self._labels[r][c] if self._labels else f"r{r}c{c}"
         value = float(self._grid[r, c])
         if not math.isfinite(value):
-            return f"{label} · not measured this run"
+            return f"{label} · 本局未测量"
         return f"{label} · {self._fmt.format(value)}"
 
     def mouseMoveEvent(self, event) -> None:
@@ -1085,7 +1084,7 @@ class AsciiHeatmap(_Ignite, QWidget):
         top = _paint_title(p, pal, self._title, w)
         lay = self._layout()
         if lay is None:
-            _paint_empty(p, pal, QRectF(0, top, w, h - top), "no movement data")
+            _paint_empty(p, pal, QRectF(0, top, w, h - top), "没有移动数据")
             return
         x0, y0, zw, zh, gap, rows, cols, gutter, words_h, foot_h = lay
 
@@ -1200,7 +1199,11 @@ class AsciiHeatmap(_Ignite, QWidget):
         # A word spanning several zones is drawn ONCE over the whole band, so
         # the axis distinguishes exactly what the vocabulary distinguishes.
         p.setFont(gf)
-        row_words, col_words = _axis_words(rows, cols)
+        raw_rows, raw_cols = _axis_words(rows, cols)
+        axis_zh = {"lower": "下方", "middle": "中部", "upper": "上方",
+                   "left": "左侧", "center": "中央", "right": "右侧"}
+        row_words = tuple(axis_zh.get(word, word) for word in raw_rows)
+        col_words = tuple(axis_zh.get(word, word) for word in raw_cols)
         if gutter and row_words:
             p.setPen(_dim(pal.fg_dim, 0.95))
             for word, lo_band, hi_band in _label_groups(row_words):
@@ -1399,18 +1402,18 @@ class AsciiTrend(_Ignite, QWidget):
         if n < 2:
             return "", ""            # no axis is drawn: there is no trend yet
         first = self._first_run
-        left = (f"run {first} · " if first is not None else "oldest shown · ")
+        left = (f"第 {first} 局 · " if first is not None else "最早显示 · ")
         left += _fmt_value(self._fmt, self._values[0])
         if n == 2:
             # Two runs are a segment, not a trend anyone should read a
             # direction off — the shape says so and the axis has to agree.
-            right = "2 runs · segment"
+            right = "2 局 · 仅为线段"
         elif n <= ncols:
-            right = (f"run {first + n - 1} · newest" if first is not None
-                     else f"{n} runs · newest")
+            right = (f"第 {first + n - 1} 局 · 最新" if first is not None
+                     else f"{n} 局 · 最新")
         else:
-            right = (f"runs {first}..{first + n - 1} · {ncols} columns"
-                     if first is not None else f"{n} runs · {ncols} columns")
+            right = (f"第 {first}..{first + n - 1} 局 · {ncols} 列"
+                     if first is not None else f"{n} 局 · {ncols} 列")
         return left, right
 
     def _y_range(self) -> tuple[float, float, bool]:
@@ -1467,7 +1470,7 @@ class AsciiTrend(_Ignite, QWidget):
         w, h = self.width(), self.height()
         top = _paint_title(p, pal, self._title, w)
         if len(self._values) < 2:
-            _paint_empty(p, pal, QRectF(0, top, w, h - top), "not enough runs yet")
+            _paint_empty(p, pal, QRectF(0, top, w, h - top), "训练局数不足")
             return
 
         gf = theme.mono(14)
@@ -1496,7 +1499,7 @@ class AsciiTrend(_Ignite, QWidget):
         x_left, x_right = 10 + gutter, w - tag_w - 10
         y_top, y_bot = top + 8, h - _AXIS_H - 6
         if x_right - x_left < 40 or y_bot - y_top < 3 * chh:
-            _paint_empty(p, pal, QRectF(0, top, w, h - top), "panel too small")
+            _paint_empty(p, pal, QRectF(0, top, w, h - top), "面板空间不足")
             return
         ncols = max(int((x_right - x_left) // cw), 4)
         grid_rows = max(int((y_bot - y_top) // chh), 3)
@@ -1670,7 +1673,7 @@ class AsciiTrend(_Ignite, QWidget):
         p.drawEllipse(QPointF(first_x, float(run_py[0])), 3.0, 3.0)
         i_max, i_min = int(np.argmax(src)), int(np.argmin(src))
         p.setFont(lf)
-        for i, kind in ((i_max, "max"), (i_min, "min")):
+        for i, kind in ((i_max, "最高"), (i_min, "最低")):
             if flat or i in (0, n - 1) or src[i_max] == src[i_min]:
                 # `flat`: the spread between them is float noise, and "max 67%"
                 # over "min 67%" on one flat line is two labels claiming a
@@ -1686,7 +1689,7 @@ class AsciiTrend(_Ignite, QWidget):
             txt = f"{kind} {_fmt_value(self._fmt, src[i])}"
             tw = lfm.horizontalAdvance(txt)
             tx = min(max(jx - tw / 2, x_left), x_right - tw)
-            ty = py - chh - 4 if kind == "max" else py + 4
+            ty = py - chh - 4 if kind == "最高" else py + 4
             ty = min(max(ty, y_top - 2), y_bot - 12)
             p.setPen(_dim(pal.fg_dim, q))
             p.drawText(QRectF(tx, ty, tw + 4, 14), Qt.AlignLeft | Qt.AlignVCenter, txt)
@@ -1708,7 +1711,7 @@ class AsciiTrend(_Ignite, QWidget):
         # always lands on the line's glyph run — and at 0.85 the glyphs read
         # straight through the text in both themes. A label you cannot read is
         # not a label, and the line loses ~9 characters of an unchanging rule.
-        btxt = f"mean {_fmt_value(self._fmt, base)}"
+        btxt = f"平均值 {_fmt_value(self._fmt, base)}"
         bth = lfm.height() + 4
         btw = lfm.horizontalAdvance(btxt) + 10
         chip = QRectF(x_right - btw, by - bth / 2, btw, bth)

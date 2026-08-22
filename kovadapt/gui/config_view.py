@@ -93,15 +93,15 @@ class ConfigView(QWidget):
         # reasoning. getattr-guarded: the fields may land in a later build.
         self.dpi = _dspin(
             float(getattr(s, "mouse_dpi", 0) or 800.0), 100.0, 32000.0, 50.0, 0,
-            "Your mouse's hardware DPI (CPI) as set in its software.")
+            "鼠标驱动或配套软件中设置的硬件 DPI（CPI）。")
         self.sens = _dspin(
             float(getattr(s, "game_sens", 0) or 1.0), 0.01, 20.0, 0.01, 2,
-            "Your in-game sensitivity in KovaaK's.")
+            "KovaaK's 游戏内使用的鼠标灵敏度。")
         self.cm360 = QLabel("")
         self.cm360.setProperty("stat", True)
         cm_cap = QLabel(
-            "The adaptive model uses this to reason about per-task sensitivity "
-            "— cm/360 is derived from KovaaK's yaw of 0.022° per count.")
+            "自适应模型会用这个数值分析不同训练类型所需的灵敏度；cm/360 按 "
+            "KovaaK's 每计数 0.022° 的 yaw 值换算。")
         cm_cap.setProperty("dim", True)
         cm_cap.setWordWrap(True)
         # "&&" is a literal ampersand. A bare "&" marks the next character as a
@@ -161,17 +161,16 @@ class ConfigView(QWidget):
         # Motion intensity is one dial rather than a code change: taste is
         # personal, and on a 240 Hz panel a dropped frame is visible.
         self.motion = QComboBox()
-        for label, value in (("Full — everything, including ambient life", "full"),
-                             ("Reduced — reveals only, no idle motion", "reduced"),
-                             ("Off — everything instant", "off")):
+        for label, value in (("完整 — 包含背景与所有过渡动画", "full"),
+                             ("精简 — 只保留有意义的结果过渡", "reduced"),
+                             ("关闭 — 所有内容立即显示", "off")):
             self.motion.addItem(label, value)
         cur = str(getattr(s, "motion", "full") or "full").lower()
         idx = self.motion.findData(cur)
         self.motion.setCurrentIndex(idx if idx >= 0 else 0)
         self.motion.setToolTip(
-            "Full animates the backdrop eye and every reveal. Reduced keeps the "
-            "reveals that carry meaning (a run landing) and drops ambient loops. "
-            "Off paints final states with no animation at all.")
+            "“完整”会播放背景和所有揭示动画；“精简”只保留本局结果等有意义的"
+            "过渡并关闭环境循环；“关闭”会直接显示最终状态，不播放动画。")
         self.telemetry = QCheckBox(tr("Record raw mouse telemetry while watching"))
         self.telemetry.setChecked(s.telemetry_enabled)
         self.clips = QCheckBox(
@@ -191,41 +190,41 @@ class ConfigView(QWidget):
         # advanced engine internals
         self.half_life = _dspin(
             s.ewma_half_life, 1.0, 50.0, 1.0, 1,
-            "Runs until an old run's influence on your averages halves.")
+            "旧训练记录对平均值的影响衰减到一半所需的局数。")
         self.coupling = _dspin(
             s.size_speed_coupling, 0.0, 1.0, 0.05, 2,
-            "How much faster targets are enlarged to compensate (fairness floor).")
+            "目标移动加快时，为保持公平而相应放大目标的程度。")
         self.pace_gain = _dspin(
             s.pace_coupling_gain, 0.0, 2.0, 0.05, 2,
-            "How hard running above your normal pace pushes movement up next run.")
+            "本局节奏高于个人常态时，下一局目标移动强度提高多少。")
         self.min_shots = _ispin(
             s.min_shots_for_size, 0, 100,
-            "Runs with fewer shots than this never move the size controller.")
+            "本局射击数低于此值时，不允许尺寸控制器改变目标大小。")
         self.obs_noise = _dspin(
             s.bandit_obs_noise, 0.05, 2.0, 0.05, 2,
-            "Observation noise of region evidence: lower = each run moves beliefs more.")
+            "区域证据的观测噪声；数值越低，每局数据对模型判断的影响越大。")
         self.prior_var = _dspin(
             s.bandit_prior_var, 0.1, 5.0, 0.1, 2,
-            "Prior variance of unexplored regions: higher = more early exploration.")
+            "未探索区域的先验方差；数值越高，训练初期越倾向探索新区域。")
         self.decay = _dspin(
             s.bandit_posterior_decay, 0.0, 0.5, 0.01, 2,
-            "Per-run forgetting toward the prior so fixed weaknesses re-open (0 = never forget).")
+            "每局结束后向先验状态回退的比例，使已改善的弱项能够重新接受验证；0 表示永不遗忘。")
         adv = QGroupBox(tr("Advanced engine internals"))
         f = _form(adv)
-        f.addRow("EWMA half-life (runs)", self.half_life)
-        f.addRow("Size–speed coupling", self.coupling)
-        f.addRow("Pace coupling gain", self.pace_gain)
-        f.addRow("Min shots for size control", self.min_shots)
-        f.addRow("Bandit observation noise", self.obs_noise)
-        f.addRow("Bandit prior variance", self.prior_var)
-        f.addRow("Bandit posterior decay", self.decay)
+        f.addRow("EWMA 半衰期（局）", self.half_life)
+        f.addRow("尺寸—速度耦合", self.coupling)
+        f.addRow("节奏耦合增益", self.pace_gain)
+        f.addRow("尺寸调整最低射击数", self.min_shots)
+        f.addRow("Bandit 观测噪声", self.obs_noise)
+        f.addRow("Bandit 先验方差", self.prior_var)
+        f.addRow("Bandit 后验衰减", self.decay)
 
         # trace-informed dodge
         self.dodge_en = QCheckBox("让目标更常向你的弱侧移动")
         self.dodge_en.setChecked(s.dodge_bias_enabled)
         self.dodge_gain = _dspin(
             s.dodge_bias_gain, 0.0, 2.0, 0.1, 1,
-            "Scales measured left/right bias into strafe asymmetry.")
+            "把测得的左右方向差异转换成目标闪避时间的不对称程度。")
         dodge = QGroupBox(tr("Trace-informed dodge direction"))
         f = _form(dodge)
         f.addRow(self.dodge_en)
@@ -238,10 +237,10 @@ class ConfigView(QWidget):
         self.fat_ease.setChecked(s.fatigue_easing)
         self.fat_sens = _dspin(
             s.fatigue_sensitivity, 0.1, 3.0, 0.1, 1,
-            "Above 1 flags fatigue sooner; below 1, later.")
+            "高于 1 会更早判定疲劳，低于 1 会更晚判定。")
         self.fat_runs = _ispin(
             s.fatigue_min_runs, 2, 20,
-            "Runs with telemetry needed before the trend is trusted.")
+            "在疲劳趋势被采信前，至少需要多少局带鼠标遥测的记录。")
         fat = QGroupBox(tr("Session fatigue"))
         f = _form(fat)
         f.addRow(self.fat_en)
@@ -282,8 +281,7 @@ class ConfigView(QWidget):
         save.setProperty("accent", True)
         save.clicked.connect(self._save)
         reset = QPushButton(tr("Reset to defaults"))
-        reset.setToolTip("Restore every knob to the shipped defaults (paths are kept). "
-                         "Takes effect after Save.")
+        reset.setToolTip("把所有参数恢复为软件默认值（保留路径设置）；点击“保存设置”后生效。")
         reset.clicked.connect(self._reset)
         self.status = QLabel("")
         self.status.setProperty("dim", True)
@@ -305,9 +303,8 @@ class ConfigView(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(18)
         lay.addWidget(HintBar(settings, (
-            "Every knob has a tooltip — hover it. The defaults reproduce the "
-            "shipped behavior, <b>Reset to defaults</b> gets you back, and "
-            "nothing applies until <b>Save settings</b>.")))
+            "每个参数都有悬停说明。默认值就是软件初始行为；随时可以点击"
+            "<b>恢复默认值</b>回到初始设置。所有改动只有点击<b>保存设置</b>后才会生效。")))
         for box in (mouse, diff, reg, mov, tel, adv, dodge, fat, arch):
             lay.addWidget(box)
         lay.addLayout(bar)
@@ -374,7 +371,7 @@ class ConfigView(QWidget):
             for key, *_ in _ARCH_KEYS:
                 spins[key].setValue(float(ov.get(key, getattr(d, key))))
             self._remember_arch(name, ov)
-        self.status.setText("defaults loaded — click Save settings to apply")
+        self.status.setText("已载入默认值；点击“保存设置”后应用")
 
     def _save(self) -> None:
         s = self.s
@@ -445,5 +442,5 @@ class ConfigView(QWidget):
         s.archetype_overrides = overrides
         path = s.save()
         self.status.setText(
-            f"saved to {path} — restart the watch session to apply everything")
+            f"已保存到 {path}；重新开始分析会话后全部生效")
         self.settings_changed.emit(s)

@@ -392,7 +392,7 @@ def test_analysis_view_captions_toggles_and_clip_story(qapp, settings):
     # clips are disabled in these Settings: the dead button explains itself,
     # and the same one-liner appears as the inline dim hint under it
     assert not view.clip_btn.isEnabled()
-    assert "Capture video clips" in view.clip_btn.toolTip()
+    assert "关键片段录像" in view.clip_btn.toolTip()
     assert not view.clip_hint.isHidden()
     assert view.clip_hint.text() == view.clip_btn.toolTip()
     view.deleteLater()

@@ -158,7 +158,7 @@ def test_kpi_reads_state_their_baseline_when_they_have_none(qapp, settings):
     # baseline only exists from run 2 — before that the tile must say why
     # rather than compare the run against itself and call it "steady".
     tip = view.kpis["pace"].toolTip()
-    assert "baseline" in tip and "seeded from the first run" in tip
+    assert "个人基线" in tip and "由第一局初始化" in tip
     assert view.kpis["kills"].read.text() == analysis_zh("no-telemetry")
     assert view.kpis["flick"].value.text() == "—"
     assert view.kpis["flick"].read.text() == analysis_zh("thin-data")
@@ -330,20 +330,20 @@ def test_selected_moment_and_replay_describe_the_same_segment(qapp, settings):
     view.show_report(rep, trace=trace)
 
     assert view.moments.currentRow() == 0
-    assert view.replay.info.text() == "overshoot"      # not "full run"
+    assert view.replay.info.text() == "过冲"            # not the full run
     assert view.full_btn.isEnabled()
 
     view.moments.setCurrentRow(1)
-    assert view.replay.info.text() == "clean flick"
+    assert view.replay.info.text() == "干净甩枪"
 
     view.full_btn.click()                              # back out to everything
     assert view.moments.currentRow() == -1             # no row claims to be showing
-    assert view.replay.info.text() == "full run"
+    assert view.replay.info.text() == "整局"
 
     # the clip story survived the reorder: the dead button explains itself and
     # the same one-liner is the inline hint
     assert not view.clip_btn.isEnabled()
-    assert "Capture video clips" in view.clip_btn.toolTip()
+    assert "关键片段录像" in view.clip_btn.toolTip()
     assert view.clip_hint.text() == view.clip_btn.toolTip()
     view.deleteLater()
 
@@ -353,7 +353,7 @@ def test_a_run_without_telemetry_disables_the_whole_run_button(qapp, settings):
     view.show_report(_report(notable=[{"kind": "overshoot", "text": "x",
                                        "t_start": 1.0, "t_end": 2.0}]))
     assert not view.full_btn.isEnabled()
-    assert view.replay.info.text() == "no trace for this run"
+    assert view.replay.info.text() == "本局没有鼠标轨迹"
     view.deleteLater()
 
 
@@ -397,7 +397,7 @@ def test_kpi_flick_tile_honours_the_coachs_input_health_gate(qapp, settings):
     view.show_report(noisy, profile=_profile())
     assert view.kpis["flick"].read.text() == analysis_zh("noisy-input"), (
         "the tile gave an overshoot verdict the Coach refuses to give")
-    assert "too noisy" in view.kpis["flick"].toolTip()
+    assert "噪声过大" in view.kpis["flick"].toolTip()
     # and the Coach really is suppressing on the same report
     ids = {i.id for i in generate_insights(noisy, _profile(), settings)}
     assert "dx-input-health" in ids
@@ -428,7 +428,7 @@ def test_report_loads_the_replay_exactly_once(qapp, settings):
     # with no notable moments the full run is what loads — still exactly once
     calls.clear()
     view.show_report(_report(), trace=trace, profile=_profile())
-    assert calls == ["full run"]
+    assert calls == ["整局"]
     view.deleteLater()
 
 
@@ -488,7 +488,7 @@ def test_no_surface_gives_a_microstructure_verdict_on_a_noisy_run(qapp, settings
     assert "too noisy" in summary
     # the moments stay listed and replayable, but carry the caveat
     texts = [view.moments.item(r).text() for r in range(view.moments.count())]
-    assert any("noisy" in t for t in texts)
+    assert any("噪声" in t for t in texts)
     assert any("kill 7" in t for t in texts)
     # and the caption row must not steal the selection or shift the mapping
     row = view.moments.currentRow()
@@ -629,8 +629,8 @@ def test_pace_is_not_measurable_on_a_tracking_run(qapp, settings):
     assert tile.value.text() == "—", "a fake zero, not a measurement"
     assert tile.read.text() == analysis_zh("not-measurable")
     tip = tile.toolTip().lower()
-    assert "invincible" in tip, tip
-    assert "seeded from the first run" not in tip, "the false reason came back"
+    assert "目标不会死亡" in tip, tip
+    assert "由第一局初始化" not in tip, "the false reason came back"
     assert "50" not in tip, "run count is irrelevant to why this is unmeasurable"
     view.deleteLater()
 
@@ -645,7 +645,7 @@ def test_pace_still_reads_normally_when_there_are_kills(qapp, settings):
     tile = view.kpis["pace"]
     assert tile.value.text() == "1.40"
     assert tile.read.text() == analysis_zh("faster")
-    assert "1.00 EWMA" in tile.toolTip()
+    assert "EWMA 基线 1.00" in tile.toolTip()
     view.deleteLater()
 
 
@@ -700,13 +700,13 @@ def test_a_damaged_recording_says_it_is_damaged(qapp, settings, tmp_path):
     view = AnalysisView(settings)
     view.show_report(_report(trace_file=str(_truncated_trace(tmp_path))))
     said = view.replay.info.text().lower()
-    assert "damaged" in said or "unreadable" in said, said
-    assert said != "no trace for this run"
+    assert "已损坏" in said or "无法读取" in said, said
+    assert said != "本局没有鼠标轨迹"
 
     # ...and a run that genuinely has no telemetry still says so
     view.show_report(_report())
     assert view._trace_unreadable is False
-    assert view.replay.info.text() == "no trace for this run"
+    assert view.replay.info.text() == "本局没有鼠标轨迹"
     view.deleteLater()
 
 
@@ -981,9 +981,9 @@ def test_the_bias_panel_never_names_two_different_worst_directions(qapp, setting
         # not enough: citing the right pair in the wrong order still puts a
         # different direction at the top of the sentence than under the red
         # bar, which is the whole defect.
-        first = min((d for d in dirs if d in footer),
+        first = min((d for d in shown_dirs if d in footer),
                     key=lambda d: footer.index(d), default=None)
-        assert first == dirs[marked], (
+        assert first == shown_dirs[marked], (
             f"the footer leads with {first!r} while the red bar is on "
             f"{dirs[marked]!r}: {footer!r}")
     view.deleteLater()

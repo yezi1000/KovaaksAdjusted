@@ -2289,16 +2289,16 @@ class SpawnGrid(_Art):
         key = f"r{row}c{col}"
         base = sm.base.get(key, 0)
         if base == 0:
-            return f"{key} - no spawn point here in the base layout"
-        out = f"{key} - base {base} spawns ({sm.base_share(key):.1%})"
+            return f"{key} — 基础布局中此处没有目标生成点"
+        out = f"{key} — 基础布局 {base} 个生成点（{sm.base_share(key):.1%}）"
         if sm.adaptive:
-            out += (f" -> variant {sm.adaptive.get(key, 0)} "
-                    f"({sm.share(key):.1%})")
+            out += (f" → 变体 {sm.adaptive.get(key, 0)} 个"
+                    f"（{sm.share(key):.1%}）")
         elif sm.planned:
-            out += f" -> planned {sm.planned.get(key, 0.0):.1%}"
+            out += f" → 计划占比 {sm.planned.get(key, 0.0):.1%}"
         if key == sm.focus:
-            out += ("  [focus - NOT applied, the generator left this layout alone]"
-                    if sm.untouched else "  [focus]")
+            out += ("  [重点区域 — 未应用，生成器保持了原始布局]"
+                    if sm.untouched else "  [重点区域]")
         return out
 
     def mouseMoveEvent(self, event) -> None:
@@ -2328,6 +2328,21 @@ class SpawnGrid(_Art):
         if geom is None:
             reason = (sm.reason if sm is not None and sm.reason
                       else "该场景没有可用的目标生成数据")
+            if reason == "this layout has no target PlayerSpawn entities":
+                reason = "该布局中没有目标 PlayerSpawn 实体"
+            match = re.fullmatch(
+                r"(\d+) target spawns for a (\d+)x(\d+) grid — the generator "
+                r"leaves the layout untouched below (\d+), so no spawn focus "
+                r"can be applied to this scenario", reason)
+            if match:
+                reason = (f"此 {match.group(2)}×{match.group(3)} 网格只有 "
+                          f"{match.group(1)} 个目标生成点，少于所需的 {match.group(4)} 个；"
+                          "生成器会保持原始布局，无法应用重点区域。")
+            elif reason.startswith("could not read "):
+                reason = "无法读取场景文件：" + reason.removeprefix("could not read ")
+            elif "is not in the game's Scenarios folder" in reason:
+                reason = reason.replace("is not in the game's Scenarios folder",
+                                        "不在游戏的 Scenarios 文件夹中")
             _empty_band(p, pal, QRectF(0, top, width, height - top), reason)
             return
         x0, y0, cw, ch, gap, rows, cols = geom

@@ -179,7 +179,7 @@ def test_deck_reports_the_run_against_the_frozen_baseline(qapp, settings):
         _report(0.640, score=512.0,
                 input_health={"polling_hz_est": 998.0, "jitter_ms": 0.4}),
         _profile(ewma=0.610, score=500.0, scale=1.25, movement=0.30))
-    assert ov.deck.row_text("acc") == "64.0% +3.0pp"    # the delta is stated
+    assert ov.deck.row_text("acc") == "64.0% +3.0点"    # the delta is stated
     assert ov.deck.row_text("score") == "512 +12"
     assert ov.deck.row_text("size") == "1.25x"
     assert ov.deck.row_text("move") == "0.30"
@@ -196,10 +196,10 @@ def test_fatigue_row_waits_for_the_tracker(qapp, settings):
     ov.start_session("Beta 1wall Click [Adaptive]")
     ov.on_report(_report(0.61, fatigue={"level": "fresh", "score": 0.0, "runs": 2}),
                  _profile())
-    assert ov.deck.row_text("fatigue") == "2/5 runs"
+    assert ov.deck.row_text("fatigue") == "2/5 局"
     ov.on_report(_report(0.55, fatigue={"level": "declining", "score": 0.4, "runs": 6}),
                  _profile())
-    assert ov.deck.row_text("fatigue") == "declining"
+    assert ov.deck.row_text("fatigue") == "正在下降"
     ov.close()
 
 
@@ -207,7 +207,7 @@ def test_missing_telemetry_says_so(qapp, settings):
     ov = OverlayWindow(settings)
     ov.start_session("Beta 1wall Click [Adaptive]")
     ov.on_report(_report(0.61), _profile())
-    assert ov.deck.row_text("input") == "no telemetry"
+    assert ov.deck.row_text("input") == "无遥测"
     ov.close()
 
 

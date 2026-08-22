@@ -175,16 +175,16 @@ def test_bars_ratio_note_cites_the_top_two_bars(qapp, pal):
     bars = viz.AsciiBars()
     bars.set_data(["left", "vertical", "right"], [0.22, 0.10, 0.24])
     note = bars.ratio_note()
-    assert "right 0.24" in note and "left 0.22" in note and "1.09x" in note
+    assert "right 0.24" in note and "left 0.22" in note and "1.09 倍" in note
 
     bars.set_data(["left", "right"], [0.0, 0.0])
-    assert bars.ratio_note() == "every bar is 0.00 — no cost recorded to compare"
+    assert bars.ratio_note() == "所有方向均为 0.00 — 没有可供比较的代价"
 
     bars.set_data(["left", "right"], [0.4, 0.0])
-    assert bars.ratio_note() == "left 0.40 is the only bar above zero"
+    assert bars.ratio_note() == "只有left高于 0：0.40"
 
     bars.set_data(["vertical"], [0.4])
-    assert bars.ratio_note() == "vertical 0.40 — one direction measured"
+    assert bars.ratio_note() == "vertical 0.40 — 仅测得一个方向"
     assert viz.AsciiBars().ratio_note() == ""
 
 
@@ -316,7 +316,7 @@ def test_heatmap_paints_no_region_keys_but_keeps_them_on_hover(qapp, pal):
     x0, y0, zw, zh, gap, rows, cols = keyed._geom()
     top_left = keyed.zone_info(x0 + zw / 2, y0 + zh / 2)
     assert top_left == "r4c0 · +1.90"              # exact key, exact value
-    assert "not measured" in keyed.zone_info(x0 + zw / 2,
+    assert "未测量" in keyed.zone_info(x0 + zw / 2,
                                              y0 + 2 * (zh + gap) + zh / 2)
 
 
@@ -337,12 +337,12 @@ def test_heatmap_counts_the_zones_it_measured(qapp, pal):
     hm = viz.AsciiHeatmap(title="weakness by wall region")
     grid, labels = viz.region_grid({"r4c0": 1.9, "r3c1": -0.4}, 5, 5)
     hm.set_data(grid, labels, fmt="{:+.2f}")
-    assert hm.coverage_note().startswith("2 of 25 zones measured")
+    assert hm.coverage_note().startswith("已测量 2/25 个区域")
 
     hm.set_data(np.zeros((5, 5)))
     assert hm.coverage_note() == ""                 # nothing to explain
     hm.set_data(np.full((3, 3), np.nan))
-    assert hm.coverage_note() == "no zone measured this run — all 9 drawn hollow"
+    assert hm.coverage_note() == "本局未测得任何区域 — 9 个区域全部以空心显示"
     assert not _image(hm, pal, 690, 270).isNull()
     hm.clear()
     assert hm.coverage_note() == ""

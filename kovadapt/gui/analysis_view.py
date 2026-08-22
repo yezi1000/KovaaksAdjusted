@@ -199,7 +199,17 @@ def analysis_zh(text: str) -> str:
     )
     for pattern, replacement in patterns:
         if re.fullmatch(pattern, text):
-            return re.sub(pattern, replacement, text)
+            out = re.sub(pattern, replacement, text)
+            region_words = {
+                "lower left": "左下", "lower center": "下方中央",
+                "lower right": "右下", "middle left": "左侧中部",
+                "middle right": "右侧中部", "upper left": "左上",
+                "upper center": "上方中央", "upper right": "右上",
+                "center": "中央", " SD": " 个标准差",
+            }
+            for old, new in region_words.items():
+                out = out.replace(old, new)
+            return out
     return text
 
 
@@ -227,6 +237,44 @@ def report_summary_zh(rep: RunReport) -> str:
     if rep.mean_flick_ms > 0:
         lines.append(f"平均甩枪时间 {rep.mean_flick_ms:.0f} 毫秒。")
     return " ".join(lines)
+
+
+def moment_text_zh(moment: dict) -> str:
+    """Translate a persisted notable-moment sentence without rewriting JSON."""
+    text = str(moment.get("text", ""))
+    dirs = {
+        "right": "向右", "up-right": "右上", "up": "向上",
+        "up-left": "左上", "left": "向左", "down-left": "左下",
+        "down": "向下", "down-right": "右下",
+    }
+    patterns = (
+        (r"Overshot a ([a-z-]+) flick by (\d+)% of its distance, then corrected (\d+)x before shooting\.",
+         lambda m: (f"一次{dirs.get(m.group(1), m.group(1))}甩枪过冲了移动距离的 "
+                    f"{m.group(2)}%，射击前又修正了 {m.group(3)} 次。")),
+        (r"Hesitated on a ([a-z-]+) target: (\d+) micro-corrections over (\d+)ms before committing\.",
+         lambda m: (f"处理{dirs.get(m.group(1), m.group(1))}目标时出现犹豫：在 "
+                    f"{m.group(3)} 毫秒内进行了 {m.group(2)} 次微调后才击发。")),
+        (r"Slow ([a-z-]+) acquisition: (\d+)ms for a (\d+)-count flick \(bottom 10% of this run's pace\)\.",
+         lambda m: (f"{dirs.get(m.group(1), m.group(1))}目标获取偏慢："
+                    f"{m.group(3)} 计数的甩枪耗时 {m.group(2)} 毫秒，"
+                    "属于本局最慢的 10%。")),
+        (r"Reference: a clean (\d+)-count ([a-z-]+) flick — (\d+)ms, no overshoot\. This is your benchmark\.",
+         lambda m: (f"参考动作：一次干净的 {m.group(1)} 计数"
+                    f"{dirs.get(m.group(2), m.group(2))}甩枪，耗时 {m.group(3)} 毫秒，"
+                    "没有过冲；可将它作为本局基准。")),
+    )
+    for pattern, render in patterns:
+        match = re.fullmatch(pattern, text)
+        if match:
+            return render(match)
+    kinds = {
+        "overshoot": "过冲片段", "hesitation": "犹豫与连续修正片段",
+        "slow_flick": "较慢甩枪片段", "clean_flick": "干净甩枪参考片段",
+    }
+    # Older reports may contain free-form sentences that predate the known
+    # templates.  Preserve those details instead of replacing them with only
+    # a generic kind label; use the label solely when the report has no text.
+    return text or kinds.get(str(moment.get("kind", "")), "关键片段")
 
 # Claim floors. A takeaway has to clear one of these or the chart keeps its
 # neutral title; each is kovadapt's own editorial calibration except the
@@ -987,10 +1035,10 @@ class AnalysisView(QWidget):
         # segments. The full run is loaded only when nothing selected one.
         self._fill_moments(rep)
         if not has_trace:
-            self.replay.clear("recording unreadable — file is damaged"
-                              if self._trace_unreadable else "no trace for this run")
+            self.replay.clear("轨迹文件已损坏，无法读取"
+                              if self._trace_unreadable else "本局没有鼠标轨迹")
         elif self.moments.currentRow() < 0:
-            self.replay.load(self.trace, label="full run", flicks=self.flicks)
+            self.replay.load(self.trace, label="整局", flicks=self.flicks)
         self._update_clip_state(self._moment_index(self.moments.currentRow()))
 
     def load_report_file(self, path: Path | str) -> None:
@@ -1020,8 +1068,7 @@ class AnalysisView(QWidget):
         if eff is None:
             self.kpis["accuracy"].set_value(
                 f"{rep.accuracy:.0%}", "hit rate", "—", "dim",
-                "No settings loaded, so the accuracy band this run would be "
-                "judged against is unknown.")
+                "尚未载入设置，因此无法确定本局应当与哪个准确率训练区间比较。")
         else:
             lo, hi = eff.target_accuracy_low, eff.target_accuracy_high
             if rep.accuracy > hi:
@@ -1030,23 +1077,23 @@ class AnalysisView(QWidget):
                 read, tone = "below-band", "warn"
             else:
                 read, tone = "in-band", "good"
-            band_note = ("the 85-95% band is primary-sourced for clicking"
+            arch_name = {"clicking": "点击", "tracking": "跟枪",
+                         "switching": "目标切换"}.get(arche, arche)
+            band_note = ("点击训练的 85%–95% 区间有直接资料依据"
                          if arche == "clicking" else
-                         f"kovadapt's {arche} band is an extrapolation of the "
-                         "same control law")
+                         f"{arch_name}训练区间是 kovadapt 根据相同控制规律作出的外推")
             self.kpis["accuracy"].set_value(
                 f"{rep.accuracy:.0%}", "hit rate", read, tone,
-                f"{rep.accuracy:.1%} of shots hit, against the {lo:.0%}-{hi:.0%} "
-                f"{arche} band the size controller holds you in ({band_note}).")
+                f"本局命中率 {rep.accuracy:.1%}；尺寸控制器会把{arch_name}训练维持在 "
+                f"{lo:.0%}–{hi:.0%} 区间（{band_note}）。")
 
         # kills, plus how much of the run telemetry actually saw
         n = rep.n_flicks
         self.kpis["kills"].set_value(
             str(rep.kills), "kills",
             f"{n} flicks" if n else "no-telemetry", "dim" if n else "warn",
-            f"{rep.kills} kills in the stats file. Mouse telemetry segmented "
-            f"{n} flicks out of this run — every chart below is built from "
-            "those, so a run without telemetry shows stats only.")
+            f"统计文件记录了 {rep.kills} 次击杀；鼠标遥测从本局识别出 {n} 次甩枪。"
+            "下方图表均以这些甩枪为依据；没有遥测时只显示游戏统计。")
 
         # pace against the profile's own EWMA
         base = profile.ewma_kps if profile is not None else 0.0
@@ -1061,14 +1108,11 @@ class AnalysisView(QWidget):
             # explained it with "the EWMA needs a second run", which is a
             # specific and wrong reason on a profile with fifty.
             if arche == "tracking":
-                why = ("This scenario's targets are invincible, so KovaaK's "
-                       "reports no kills and kills-per-second cannot describe "
-                       "it. Accuracy and flick quality are the reads that "
-                       "apply to tracking.")
+                why = ("此跟枪场景的目标不会死亡，因此 KovaaK's 不记录击杀，"
+                       "击杀/秒不适用于这个场景；应查看准确率与甩枪质量。")
             else:
-                why = ("KovaaK's recorded no kills in this run, so there is "
-                       "no kills-per-second to report. Accuracy above is "
-                       "still measured from the shots that were fired.")
+                why = ("KovaaK's 本局没有记录到击杀，因此无法计算击杀/秒；"
+                       "上方准确率仍由已经完成的射击计算。")
             self.kpis["pace"].set_value("—", "kills/s", "not-measurable",
                                         "dim", why)
         # run_count > 1, not > 0: observe_run seeds every EWMA to the first
@@ -1082,17 +1126,14 @@ class AnalysisView(QWidget):
                 read, tone = "slower", "warn"
             else:
                 read, tone = "steady", "dim"
-            why = (f"{rep.kps:.2f} kills/s against your {base:.2f} EWMA over "
-                   f"{profile.run_count} runs ({delta:+.0%}). The "
-                   f"+/-{_PACE_STEP:.0%} cutoff for calling that a change is "
-                   "kovadapt's editorial calibration.")
+            why = (f"本局 {rep.kps:.2f} 击杀/秒，对比 {profile.run_count} 局形成的"
+                   f"个人 EWMA 基线 {base:.2f}（{delta:+.0%}）。kovadapt 使用 "
+                   f"±{_PACE_STEP:.0%} 作为判断节奏变化的校准阈值。")
         else:
             read, tone = "no-baseline", "dim"
             runs = profile.run_count if profile is not None else 0
-            why = (f"{rep.kps:.2f} kills/s. This scenario has {runs} run"
-                   f"{'' if runs == 1 else 's'} of history — the pace EWMA is "
-                   "seeded from the first run, so it needs a second before it "
-                   "is a baseline rather than a copy of this run.")
+            why = (f"本局 {rep.kps:.2f} 击杀/秒；此场景目前只有 {runs} 局历史。"
+                   "节奏 EWMA 由第一局初始化，至少完成第二局后才会成为可比较的个人基线。")
         if rep.kills:
             self.kpis["pace"].set_value(f"{rep.kps:.2f}", "kills/s",
                                         read, tone, why)
@@ -1115,18 +1156,15 @@ class AnalysisView(QWidget):
             read, tone = "clean", "good"
         else:
             read, tone = "mixed", "warn"
-        why = (f"Mean flick {rep.mean_flick_ms:.0f} ms over {n} flicks: "
-               f"{rep.overshoot_rate:.0%} overshot with "
-               f"{rep.mean_corrections:.1f} corrective submovements each. The "
-               f"{_OVERSHOOT_HIGH:.0%} / {_CORRECTIONS_CHAIN:.0f} cutoffs and "
-               f"the {_MIN_FLICKS}-flick floor are the same ones the Coach "
-               "reads microstructure through (kovadapt editorial calibration).")
+        why = (f"{n} 次甩枪的平均时间为 {rep.mean_flick_ms:.0f} 毫秒；"
+               f"其中 {rep.overshoot_rate:.0%} 出现过冲，每次平均包含 "
+               f"{rep.mean_corrections:.1f} 个修正子动作。{_OVERSHOOT_HIGH:.0%} 过冲阈值、"
+               f"{_CORRECTIONS_CHAIN:.0f} 次修正阈值和至少 {_MIN_FLICKS} 次甩枪的样本要求，"
+               "与训练建议使用的微观动作判断标准一致（kovadapt 校准值）。")
         if degraded:
-            why = (f"Mean flick {rep.mean_flick_ms:.0f} ms over {n} flicks, but "
-                   "this run's input timing is too noisy to read flick "
-                   "microstructure from, so no overshoot or directional "
-                   "verdict is offered for it anywhere on this page. The "
-                   "flick time itself is still measured.")
+            why = (f"{n} 次甩枪的平均时间为 {rep.mean_flick_ms:.0f} 毫秒，但本局输入时序"
+                   "噪声过大，无法可靠读取甩枪微观结构，因此页面不会给出过冲或方向结论；"
+                   "甩枪用时本身仍然有效。")
         self.kpis["flick"].set_value(
             f"{rep.mean_flick_ms:.0f}" if rep.mean_flick_ms > 0 else "—", "ms",
             read, tone, why)
@@ -1211,13 +1249,14 @@ class AnalysisView(QWidget):
 
     def _draw_bias(self, rep: RunReport) -> None:
         b = rep.bias or {}
-        dirs = ["left", "vertical", "right"]
+        direction_keys = ["left", "vertical", "right"]
+        direction_labels = ["左侧", "垂直", "右侧"]
         vals = [
             (b.get(d) or {}).get("overshoot", 0.0)
             + 0.15 * (b.get(d) or {}).get("corrections", 0.0)
-            for d in dirs
+            for d in direction_keys
         ]
-        ns = [(b.get(d) or {}).get("n", 0) for d in dirs]
+        ns = [(b.get(d) or {}).get("n", 0) for d in direction_keys]
         degraded = input_degraded(rep)
         moving = (rep.player_frame or "") == "MOBILE"
         self.bias_bars.set_title(analysis_zh(_bias_title(vals, ns, degraded, moving)))
@@ -1238,7 +1277,8 @@ class AnalysisView(QWidget):
             self.bias_bars.set_data([], [])
         else:
             compare, worst = _bias_claim(vals, ns, degraded)
-            self.bias_bars.set_data(dirs, vals, [f"{n} flicks" for n in ns],
+            self.bias_bars.set_data(direction_labels, vals,
+                                    [f"{n} 次甩枪" for n in ns],
                                     ratio_counts=None if degraded else ns,
                                     floor=_BIAS_COST_FLOOR,
                                     compare=compare, worst=worst)
@@ -1291,13 +1331,12 @@ class AnalysisView(QWidget):
         # them as if the timing behind them were trustworthy.
         if rep.notable and input_degraded(rep):
             note = QListWidgetItem(
-                "· input timing was noisy — treat these overshoot figures as "
-                "indicative only ·")
+                "· 本局输入时序噪声较大，以下过冲数值仅供参考 ·")
             note.setForeground(QColor(theme.current().fg_dim))
             note.setFlags(Qt.NoItemFlags)          # a caption, not a choice
             self.moments.addItem(note)
         for i, m in enumerate(rep.notable):
-            it = QListWidgetItem(m["text"])
+            it = QListWidgetItem(moment_text_zh(m))
             it.setForeground(QColor(_kind_color(m["kind"])))
             it.setData(Qt.UserRole, i)
             self.moments.addItem(it)
@@ -1333,7 +1372,10 @@ class AnalysisView(QWidget):
         self._update_clip_state(idx)
         if self.trace is not None and len(self.trace) > 1:
             self.replay.load(self.trace, m["t_start"], m["t_end"],
-                             label=m["kind"].replace("_", " "),
+                             label={
+                                 "overshoot": "过冲", "hesitation": "犹豫与连续修正",
+                                 "slow_flick": "较慢甩枪", "clean_flick": "干净甩枪",
+                             }.get(m["kind"], "关键片段"),
                              flicks=self.flicks)
 
     def _show_full_run(self) -> None:
@@ -1342,17 +1384,16 @@ class AnalysisView(QWidget):
         if self.trace is None or len(self.trace) <= 1:
             return
         self.moments.setCurrentRow(-1)        # _select_moment(-1) clears clip state
-        self.replay.load(self.trace, label="full run", flicks=self.flicks)
+        self.replay.load(self.trace, label="整局", flicks=self.flicks)
 
     # ------------------------------------------------------------------
     def _clips_off_reason(self) -> str | None:
         """Why the clips feature can't produce clips at all right now, or None
         when it can (then a missing clip is just a moment without one)."""
         if self._settings is not None and not self._settings.clips_enabled:
-            return ("Enable 'Capture video clips' in Adaptability, then new "
-                    "notable moments get clips")
+            return "请在“自适应设置”中启用关键片段录像；之后产生的新片段才会带有录像"
         if not _clips_available():
-            return "pip install kovadapt[clips] — dxcam/opencv are not installed"
+            return "尚未安装录像依赖；请运行 pip install kovadapt[clips] 安装 dxcam/opencv"
         return None
 
     def _update_clip_state(self, moment_idx: int) -> None:
@@ -1371,7 +1412,7 @@ class AnalysisView(QWidget):
         self.clip_btn.setEnabled(has_clip)
         off = self._clips_off_reason()
         self.clip_btn.setToolTip(
-            "" if has_clip else off or "No clip was captured for this moment")
+            "" if has_clip else off or "这个关键片段没有录制录像")
         self.clip_hint.setText(off or "")
         self.clip_hint.setVisible(off is not None)
 
@@ -1384,8 +1425,8 @@ class AnalysisView(QWidget):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(p))))
 
     def _open_dialog(self) -> None:
-        p, _ = QFileDialog.getOpenFileName(self, "Open run report",
+        p, _ = QFileDialog.getOpenFileName(self, "打开训练报告",
                                            str(Path.home() / ".kovadapt" / "reports"),
-                                           "Run reports (*.json)")
+                                           "训练报告 (*.json)")
         if p:
             self.load_report_file(p)

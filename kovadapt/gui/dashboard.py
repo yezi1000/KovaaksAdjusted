@@ -300,6 +300,105 @@ def localized_hero(metric: str, hero: Hero) -> Hero:
     return Hero(hero.value, word, because, hero.tone, tip)
 
 
+def dashboard_message_zh(message: str) -> str:
+    """Localize the user-visible session log without changing CLI messages."""
+    msg = str(message)
+    exact = {
+        "pick a scenario first": "请先选择一个场景",
+        "stopped": "已停止分析",
+        "mouse telemetry: recording (Raw Input)": "鼠标遥测：正在通过 Raw Input 录制",
+        "mouse telemetry: unavailable on this OS — skipping": "鼠标遥测：当前系统不支持，已跳过",
+        "clip capture: recording (ring buffer)": "录像片段：正在使用循环缓冲录制",
+        "clip capture: dxcam/opencv missing — pip install kovadapt[clips]":
+            "录像片段：缺少 dxcam/opencv；请安装 kovadapt[clips]",
+        "KovaaK's is already running": "KovaaK's 已经在运行",
+        "launching KovaaK's through Steam…": "正在通过 Steam 启动 KovaaK's…",
+        "launching KovaaK's requires Windows": "启动 KovaaK's 需要 Windows",
+    }
+    if msg in exact:
+        return exact[msg]
+    if msg.startswith("switching from "):
+        match = re.match(r"switching from (.+) to (.+)…", msg)
+        return f"正在从 {match.group(1)} 切换到 {match.group(2)}…" if match else msg
+    if msg.startswith("scenario file not found:"):
+        return "找不到场景文件：" + msg.split(":", 1)[1].strip()
+    if msg.startswith("could not create adaptive variant:"):
+        return "无法创建自适应版本：" + msg.split(":", 1)[1].strip()
+    if msg.startswith("watcher error:"):
+        return "后台分析发生错误：" + msg.split(":", 1)[1].strip()
+    if msg.startswith("could not reach Steam"):
+        detail = _after_parenthetical(msg)
+        return "无法连接 Steam；请确认 Steam 已安装并正在运行" + detail
+    if msg.startswith("jumping to "):
+        return "正在切换到场景 " + msg.removeprefix("jumping to ")
+    if msg.startswith("launching KovaaK's into "):
+        return "正在启动 KovaaK's 并进入场景 " + msg.removeprefix("launching KovaaK's into ")
+    if msg.startswith("no adaptive variant yet for "):
+        name = msg.removeprefix("no adaptive variant yet for ").split(" —", 1)[0]
+        return f"{name} 尚无自适应版本；请先开始分析"
+    if msg.startswith("could not write playlist:"):
+        return "无法写入播放列表：" + msg.split(":", 1)[1].strip()
+    if msg.startswith("KovaaK's launching —"):
+        if "staged to resume" in msg:
+            return ("正在启动 KovaaK's；kovadapt 播放列表已尝试设为自动恢复（实验功能）。"
+                    "若未自动进入，请打开 Playlists → kovadapt adaptive")
+        return ("正在启动 KovaaK's；进入游戏后打开 Playlists → kovadapt adaptive，"
+                "或浏览本地场景开始训练")
+    if msg.startswith("created "):
+        name = msg.split(" —", 1)[0].removeprefix("created ")
+        return f"已创建 {name}；在 KovaaK's 中开始训练后，每局结束都会继续适配"
+    if msg.startswith("watching "):
+        match = re.match(r"watching (.+) for (.+) runs", msg)
+        return (f"正在监测 {match.group(1)} 中的 {match.group(2)} 训练记录"
+                if match else "正在监测新的训练记录")
+    if msg.startswith("error processing "):
+        return "处理训练记录时出错：" + msg.removeprefix("error processing ")
+    if msg.startswith("clip capture: unavailable"):
+        detail = _after_parenthetical(msg)
+        return "录像片段不可用；将继续训练但不录制片段" + detail
+    if msg.startswith("neural scorer: checkpoint loaded"):
+        return "神经评分器：已载入检查点，将把甩枪质量写入报告"
+    if msg.lstrip().startswith("note: shadow transition not logged"):
+        return "提示：未写入影子策略训练记录；自适应不受影响，但 ML 训练集不会累积"
+    if msg.lstrip().startswith("fatigue:"):
+        if "dropped steadily" in msg:
+            return "疲劳：本次训练甩枪质量持续下降，建议休息 10–15 分钟"
+        return "疲劳：甩枪质量正在下降，建议近期短暂休息"
+    if msg.lstrip().startswith("neural scorer error:"):
+        return "神经评分器出错：" + msg.split(":", 1)[1].strip()
+    if msg.lstrip().startswith("archetype:"):
+        body = msg.split(":", 1)[1].strip()
+        for old, new in (("clicking", "点击"), ("tracking", "跟枪"),
+                         ("switching", "目标切换")):
+            body = body.replace(old, new)
+        body = body.replace("this run disagrees with the guess made before it was played",
+                            "本局数据修正了训练前的类型推测")
+        return "训练类型：" + body
+    if msg.lstrip().startswith("directional bias:"):
+        return "方向偏差：此场景允许玩家移动，左右甩枪代价会受到反向走位影响，因此不在这里测量"
+    if msg.lstrip().startswith("note: region "):
+        region = _first_group(r"region (r\d+c\d+)", msg, "所选区域")
+        return f"提示：{region} 没有目标生成点，未应用重点权重，也不会给该区域记入训练收益"
+    if re.match(r"\[\d\d:\d\d:\d\d\] run #", msg):
+        match = re.match(r"(\[[^]]+\]) run #(\d+) acc=([\d.]+%) score=([\d.]+) -> (.+)", msg)
+        if match:
+            return (f"{match.group(1)} 第 {match.group(2)} 局：准确率 {match.group(3)}，"
+                    f"分数 {match.group(4)} → {match.group(5)}")
+    if msg.lstrip().startswith("analysis:"):
+        return "复盘报告已生成；详细结果请查看“复盘分析”页面"
+    return msg
+
+
+def _first_group(pattern: str, text: str, default: str = "") -> str:
+    match = re.search(pattern, text)
+    return match.group(1) if match else default
+
+
+def _after_parenthetical(text: str) -> str:
+    match = re.search(r"\(([^)]+)\)", text)
+    return f"（系统原始错误：{match.group(1)}）" if match else ""
+
+
 def _mono_css(px: int) -> str:
     """`font-family`/`font-size` for a widget-level sheet.
 
@@ -611,16 +710,14 @@ class Dashboard(QWidget):
             return
         if self.s.telemetry_enabled:
             self.rec_lbl.setText(
-                f"<span style='color:{pal.bad}'>●</span> REC mouse telemetry")
+                f"<span style='color:{pal.bad}'>●</span> 正在录制鼠标遥测")
             self.rec_lbl.setToolTip(
-                "Raw Input recording started automatically with this session; "
-                "flick analysis appears with each run's report")
+                "本次训练已自动开始 Raw Input 录制；每局报告都会生成甩枪分析")
         else:
             self.rec_lbl.setText(
-                f"<span style='color:{pal.warn}'>○</span> telemetry off")
+                f"<span style='color:{pal.warn}'>○</span> 鼠标遥测已关闭")
             self.rec_lbl.setToolTip(
-                "Enable 'Record raw mouse telemetry' in Adaptability to get "
-                "flick analysis and region evidence")
+                "请在“自适应设置”中启用“分析时记录原始鼠标输入”，以获得甩枪分析和区域证据")
 
     def _render_install(self) -> None:
         st = self._install
@@ -628,8 +725,18 @@ class Dashboard(QWidget):
             return
         pal = theme.current()
         color = pal.good if st.ok else pal.bad
+        if not st.root_found:
+            description = "未找到 KovaaK's 安装；请设置 KOVAAKS_ROOT 或检查路径设置"
+        else:
+            bits = ["已找到 KovaaK's"]
+            bits.append("Steam 清单正常" if st.manifest_found else "缺少 Steam 安装清单")
+            if not st.steam_found:
+                bits.append("未找到 Steam 客户端")
+            if st.game_running:
+                bits.append("游戏正在运行")
+            description = " · ".join(bits)
         self.install_lbl.setText(
-            f"<span style='color:{color}'>●</span> {st.describe()}")
+            f"<span style='color:{color}'>●</span> {description}")
         self.install_lbl.setTextFormat(Qt.RichText)
         self.launch_btn.setEnabled(st.ok)
         self.play_btn.setEnabled(st.ok)
@@ -821,6 +928,7 @@ class Dashboard(QWidget):
         self.log_btn.setText(LOG_LABEL)     # opening clears the unread mark
 
     def append_log(self, line: str) -> None:
+        line = dashboard_message_zh(line)
         if line == self._last_log:      # never spam identical lines
             return
         self._last_log = line

@@ -427,7 +427,7 @@ def test_an_untouched_layout_paints_no_density_and_no_focus_ring(tmp_path, qapp)
     assert all(grid.cell_density(k) == 0.0 for k in sm.base), \
         "an untouched layout has no emphasis to paint"
     assert not grid.shows_focus_ring(sm.focus or "")
-    assert "NOT applied" in (grid.zone_info(*_centre_of(grid, sm.focus)) or "")
+    assert "未应用" in (grid.zone_info(*_centre_of(grid, sm.focus)) or "")
 
     # …and the pixels agree: the very same counts on a layout the generator DOES
     # reweight paint solid glyph blocks, and the untouched one must not.

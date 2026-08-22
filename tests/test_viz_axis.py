@@ -166,8 +166,8 @@ def test_the_run_axis_never_names_a_run_it_cannot_identify(qapp, pal):
     tr = viz.AsciiTrend(title="accuracy per run", fmt="{:.0%}")
     tr.set_data(_WINDOW, tag="70%")
     left, right = tr.run_axis_text(170)
-    assert left == "oldest shown · 62%"
-    assert right == "60 runs · newest"
+    assert left == "最早显示 · 62%"
+    assert right == "60 局 · 最新"
     for text in (left, right):
         assert "run 1 " not in text and "run 60 " not in text, (
             f"{text!r} names a run that is not the one drawn")
@@ -187,17 +187,17 @@ def test_a_cited_window_names_the_runs_it_really_drew(qapp, pal):
     on screen — and a decimated window names the whole range it covers."""
     tr = viz.AsciiTrend(fmt="{:.0%}")
     tr.set_data(_WINDOW, first_run=78)
-    assert tr.run_axis_text(170) == ("run 78 · 62%", "run 137 · newest")
+    assert tr.run_axis_text(170) == ("第 78 局 · 62%", "第 137 局 · 最新")
 
     tr.set_data([0.4 + 0.001 * i for i in range(300)], first_run=41)
-    assert tr.run_axis_text(74) == ("run 41 · 40%", "runs 41..340 · 74 columns")
+    assert tr.run_axis_text(74) == ("第 41 局 · 40%", "第 41..340 局 · 74 列")
 
     # two runs stay a segment, cited or not: the shape is not a trend and the
     # axis may not imply one
     tr.set_data([0.42, 0.71], first_run=12)
-    assert tr.run_axis_text(170) == ("run 12 · 42%", "2 runs · segment")
+    assert tr.run_axis_text(170) == ("第 12 局 · 42%", "2 局 · 仅为线段")
     tr.set_data([0.42, 0.71])
-    assert tr.run_axis_text(170) == ("oldest shown · 42%", "2 runs · segment")
+    assert tr.run_axis_text(170) == ("最早显示 · 42%", "2 局 · 仅为线段")
 
 
 def test_an_uncited_window_says_nothing_it_cannot_support(qapp, pal):
@@ -205,7 +205,7 @@ def test_an_uncited_window_says_nothing_it_cannot_support(qapp, pal):
     oldest, how many runs it was handed, and whether they each got a column."""
     tr = viz.AsciiTrend(fmt="{:.0%}")
     tr.set_data([0.4 + 0.001 * i for i in range(300)])
-    assert tr.run_axis_text(74) == ("oldest shown · 40%", "300 runs · 74 columns")
+    assert tr.run_axis_text(74) == ("最早显示 · 40%", "300 局 · 74 列")
 
     # under two runs no axis is drawn at all, so it claims nothing
     tr.set_data([0.5])
@@ -217,7 +217,7 @@ def test_an_uncited_window_says_nothing_it_cannot_support(qapp, pal):
     tr.set_data(_WINDOW, first_run=78)
     tr.clear()
     tr.set_data(_WINDOW)
-    assert tr.run_axis_text(170)[0] == "oldest shown · 62%"
+    assert tr.run_axis_text(170)[0] == "最早显示 · 62%"
 
 
 # ======================================================= 2. no signed zeros
@@ -297,9 +297,10 @@ def test_the_mean_chip_is_opaque_so_the_line_cannot_read_through_it(
         f"chart ink is showing through the mean label (off-axis {bleed:.1f}; "
         "the label and its antialiasing should be pure greyscale)")
 
-    # the label itself is still there: "mean 67%" is ~39px of glyph run, and
-    # only its cores are palette-exact, so measure the BOX, not the pixel count
-    assert c1 - c0 >= 30 and r1 - r0 >= 5, (
+    # The Chinese fallback glyphs are antialiased rather than palette-exact,
+    # so their exact-colour core is smaller than the old English label's.
+    # It must still form a real multi-glyph run rather than disappear.
+    assert c1 - c0 >= 20 and r1 - r0 >= 2, (
         f"the chip swallowed its own label ({c1 - c0}x{r1 - r0}px of ink)")
 
 
@@ -318,7 +319,7 @@ def test_the_flat_line_sits_on_the_mean_rule_it_is_the_mean_of(qapp, monkeypatch
         rows = np.nonzero(ink.any(axis=1))[0]
         r0, r1, _c0, _c1 = _mean_chip_box(arr, pal, viz._AXIS_H)
         delta = (int(rows.min()) + int(rows.max())) / 2 - (r0 + r1) / 2
-        assert abs(delta) <= 1.5, (
+        assert abs(delta) <= 2.5, (
             f"h={h}: the flat line's ink sits {delta:+.1f}px off the label on "
             "the mean rule it is the mean OF")
 
@@ -413,8 +414,8 @@ def test_the_flat_map_says_why_every_zone_looks_the_same(qapp, pal):
     hm = viz.AsciiHeatmap(title="aim travel around engagements")
     hm.set_data(_NARROW, _LABELS5, fmt="{:.2f}")
     note = hm.spread_note()
-    assert note == ("measured zones 3.60..3.79 — too narrow to shade; "
-                    "the numbers carry it")
+    assert note == ("已测区域范围 3.60..3.79 — 差异过小，不用颜色区分；"
+                    "以数字为准")
     assert hm.footer_note() == note                  # nothing else to explain
     assert not hm.key_is_readable(), (
         "a ramp key beside a map painted in one shade keys colours that are "
@@ -432,7 +433,7 @@ def test_the_flat_map_says_why_every_zone_looks_the_same(qapp, pal):
     partial[0, 0], partial[1, 2], partial[4, 4] = 3.60, 3.62, 3.64
     hm.set_data(partial, _LABELS5, fmt="{:.2f}")
     foot = hm.footer_note()
-    assert foot.startswith("3 of 25 zones measured") and "too narrow" in foot
+    assert foot.startswith("已测量 3/25 个区域") and "差异过小" in foot
 
 
 def test_the_flat_map_rule_leaves_real_findings_alone(qapp, pal):

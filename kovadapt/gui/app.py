@@ -196,16 +196,20 @@ class MainWindow(QMainWindow):
                             ("RGB", "rgb")):
             self.theme_pick.addItem(label, mode)
         self.theme_pick.setToolTip(
-            "Auto follows Windows · Midnight is near-black · RGB is "
-            "midnight with cycling colors (and a certain cat)")
+            "跟随系统会使用 Windows 外观设置；午夜黑接近纯黑；RGB 会在午夜黑"
+            "基础上循环变换颜色（以及一只特别的猫）")
         self.theme_pick.setCurrentIndex(
             {"auto": 0, "light": 1, "dark": 2, "midnight": 3, "rgb": 4}
             .get(self.themes.mode, 0))
         self.theme_pick.currentIndexChanged.connect(self._pick_mode)
 
         self.accent_pick = QComboBox()
+        accent_names = {
+            "indigo": "靛蓝", "ocean": "海蓝", "mint": "薄荷绿",
+            "rose": "玫瑰红", "ember": "余烬橙",
+        }
         for key in ACCENTS:
-            self.accent_pick.addItem(key.capitalize(), key)
+            self.accent_pick.addItem(accent_names.get(key, key), key)
         self.accent_pick.setToolTip(tr("Accent color"))
         idx = list(ACCENTS).index(self.s.accent) if self.s.accent in ACCENTS else 0
         self.accent_pick.setCurrentIndex(idx)

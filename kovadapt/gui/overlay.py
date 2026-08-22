@@ -119,8 +119,8 @@ class _StatDeck(QWidget):
     you are aiming, dancing digits are the thing you notice.
     """
 
-    ROWS = (("acc", "ACC"), ("score", "SCORE"), ("size", "SIZE"),
-            ("move", "MOVE"), ("fatigue", "FATIGUE"), ("input", "INPUT"))
+    ROWS = (("acc", "准确率"), ("score", "分数"), ("size", "尺寸"),
+            ("move", "移动"), ("fatigue", "疲劳"), ("input", "输入"))
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -347,7 +347,7 @@ class _BaselineSpark(QWidget):
             col.setAlphaF(0.75)
             p.setPen(col)
             p.drawText(QRectF(0, 0, w, self.height()), Qt.AlignCenter,
-                       "· waiting for runs ·")
+                       "· 等待训练记录 ·")
             return
 
         x0, y_top, x_end, ncols = self._lay()
@@ -360,8 +360,8 @@ class _BaselineSpark(QWidget):
         p.setPen(QColor(pal.fg_dim))
         head_r = QRectF(x0, self._pad - 1, w - x0 - 4, ch)
         p.drawText(head_r, Qt.AlignLeft | Qt.AlignVCenter,
-                   "ACC vs BASELINE" if self._ref_kind == "base"
-                   else "ACC vs SESSION AVG")
+                    "准确率 对比 个人基线" if self._ref_kind == "base"
+                    else "准确率 对比 本次平均")
         p.drawText(head_r, Qt.AlignRight | Qt.AlignVCenter,
                    f"±{span * 100:.0f}pp")
 
@@ -641,7 +641,7 @@ class OverlayWindow(QWidget):
             dev = acc - ref
             role = "good" if dev >= _FLAT_EPS else ("bad" if dev <= -_FLAT_EPS else "fg")
             segs.append((f"{acc:.1%}", role))
-            segs.append((f" {dev * 100:+.1f}pp", "dim"))
+            segs.append((f" {dev * 100:+.1f}点", "dim"))
         self.deck.set_row("acc", segs)
 
         score: list[tuple[str, str]] = [(f"{rep.score:.0f}", "fg")]
@@ -666,11 +666,13 @@ class OverlayWindow(QWidget):
         if runs < need:
             # Say what is missing rather than report the default "fresh" as a
             # verdict the tracker has not actually reached yet.
-            self.deck.set_row("fatigue", [(f"{runs}/{need} runs", "dim")])
+            self.deck.set_row("fatigue", [(f"{runs}/{need} 局", "dim")])
         else:
             level = str(fat.get("level", "fresh"))
             role = {"fresh": "good", "declining": "warn"}.get(level, "bad")
-            self.deck.set_row("fatigue", [(level, role)],
+            level_zh = {"fresh": "状态良好", "declining": "正在下降",
+                        "fatigued": "已疲劳"}.get(level, level)
+            self.deck.set_row("fatigue", [(level_zh, role)],
                               meter=float(fat.get("score", 0.0)), meter_role=role)
 
         ih = rep.input_health or {}
@@ -681,4 +683,4 @@ class OverlayWindow(QWidget):
                 (f" ±{jit:.1f}ms", "good" if jit <= 1.0 else "warn"),
             ])
         else:
-            self.deck.set_row("input", [("no telemetry", "dim")])
+            self.deck.set_row("input", [("无遥测", "dim")])

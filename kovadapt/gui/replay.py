@@ -137,9 +137,9 @@ class TrajectoryReplay(QWidget):
         self._head.setBrush(pg.mkBrush(pal.accent))
         self._shots.setPen(pg.mkPen(pal.bad, width=2))
         self.legend.setText(
-            f"<span style='color:{pal.good}'>—</span> clean flick&nbsp;&nbsp;"
-            f"<span style='color:{pal.bad}'>—</span> overshoot/correction&nbsp;&nbsp;"
-            f"<span style='color:{pal.bad}'>✕</span> shot")
+            f"<span style='color:{pal.good}'>—</span> 干净甩枪&nbsp;&nbsp;"
+            f"<span style='color:{pal.bad}'>—</span> 过冲或修正&nbsp;&nbsp;"
+            f"<span style='color:{pal.bad}'>✕</span> 射击点")
 
     # ------------------------------------------------------------------
     def _set_flicks_visible(self, on: bool) -> None:
@@ -163,7 +163,7 @@ class TrajectoryReplay(QWidget):
                 item.setData([], [])
             self._head.setData([], [])
             self._shots.setData([], [])
-            self.info.setText("no movement in this window")
+            self.info.setText("此时间窗口内没有鼠标移动")
             return
         # decimate for drawing: replay is an indicator, not a data export
         stride = max(1, t.size // _MAX_POINTS)
@@ -180,7 +180,7 @@ class TrajectoryReplay(QWidget):
         self._draw_flicks(base, flicks or [])
         self._pos = 0.0
         self.scrub.setValue(0)
-        self.info.setText(label or f"{self._t[-1]:.2f}s · {seg.clicks.size} shots")
+        self.info.setText(label or f"{self._t[-1]:.2f} 秒 · {seg.clicks.size} 次射击")
         self.plot.autoRange()
         self._sync_transport()
 
@@ -206,7 +206,7 @@ class TrajectoryReplay(QWidget):
         self._bad.setData(bad[0], bad[1])
 
     # ------------------------------------------------------------------
-    def clear(self, message: str = "no trace for this run") -> None:
+    def clear(self, message: str = "本局没有鼠标轨迹") -> None:
         """Empty the plot (used when a report arrives without telemetry, so
         the previous run's path can't masquerade as the current one)."""
         self.stop()

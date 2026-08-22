@@ -25,15 +25,15 @@ class BootWorker(QThread):
         try:
             from ..analysis.skill import fit_skill, load_report_history
 
-            self.status.emit("reading your training history…")
+            self.status.emit("正在读取训练历史…")
             entries = load_report_history(self.s.profile_path)
             if entries:
                 self.status.emit(
-                    f"fitting skill curves over {len(entries)} runs…")
+                    f"正在根据 {len(entries)} 局记录拟合能力曲线…")
                 trends = fit_skill(entries)
-                self.status.emit("skill model ready")
+                self.status.emit("能力模型已准备就绪")
             else:
-                self.status.emit("no training history yet — fresh start")
+                self.status.emit("尚无训练历史，将从零开始")
         except Exception:
             self.status.emit("")      # never let boot work break the boot
         self.trends_ready.emit(trends)

@@ -177,7 +177,7 @@ def test_heatmap_reports_unmeasured_regions_in_the_tooltip():
             info = hm.zone_info(x, y)
             if info:
                 infos.append(info)
-    assert any("not measured" in i for i in infos), (
+    assert any("未测量" in i for i in infos), (
         "unmeasured zones must say so, not report a confident number")
 
 

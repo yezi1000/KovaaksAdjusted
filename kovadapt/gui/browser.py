@@ -345,8 +345,8 @@ class ScenarioBrowser(QWidget):
             # nothing here catches.
             base = self.s.find_base_sce(name)
             if base is None:
-                raise FileNotFoundError(f"{name}.sce is in neither the "
-                                        "Scenarios folder nor the Workshop cache")
+                raise FileNotFoundError(
+                    f"在 Scenarios 文件夹和创意工坊缓存中都找不到 {name}.sce")
             from ..cli import _capability_of
             plan = AdaptationEngine(self.s).plan(
                 profile, None, capability=_capability_of(self.s, name))
@@ -355,9 +355,9 @@ class ScenarioBrowser(QWidget):
                 self.s.scenarios_dir / f"{adaptive}.sce")
             settle_focus(profile, plan)
             profile.save(self.s.profile_path)
-            msg = f"wrote {out.name} — {plan.describe()}"
+            msg = f"已写入 {out.name} — 计划参数：{plan.describe()}"
         except OSError as exc:
-            msg = f"could not generate: {exc}"
+            msg = f"无法生成自适应版本：{exc}"
         # refresh() rewrites the detail line from the (re-)selected row, so
         # the outcome has to be written after it or it is never seen.
         self.refresh()

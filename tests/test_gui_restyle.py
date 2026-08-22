@@ -121,7 +121,7 @@ def test_generate_outcome_survives_the_refresh(qapp, settings):
     name = b.selected()
     (settings.scenarios_dir / f"{name}.sce").unlink()   # force the error path
     b._generate()
-    assert b.detail.text().startswith("could not generate")
+    assert b.detail.text().startswith("无法生成自适应版本")
 
 
 # ------------------------------------------------------- optimizer window
