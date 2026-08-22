@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 
 from ..telemetry.trace import MouseTrace
 from . import theme
+from .i18n import tr
 
 _MAX_POINTS = 50_000          # decimation cap for the drawn path
 _TRAIL_SECONDS = 1.2          # live comet-trail length (full path stays dim below)
@@ -72,18 +73,18 @@ class TrajectoryReplay(QWidget):
         self.plot.addItem(self._head)
         self.plot.addItem(self._shots)
 
-        self.btn = QPushButton("Replay")
+        self.btn = QPushButton(tr("Replay"))
         self.btn.clicked.connect(self.toggle)
         self.speed_btn = QPushButton("0.5x")
         self.speed_btn.clicked.connect(self._cycle_speed)
         # layer toggles: hide/show existing items, never restructure them
-        self.toggle_path = QCheckBox("path")
-        self.toggle_path.setToolTip("Show the faint full crosshair path of the window")
-        self.toggle_flicks = QCheckBox("flicks")
+        self.toggle_path = QCheckBox(tr("path"))
+        self.toggle_path.setToolTip("显示当前时间窗口内的完整鼠标轨迹")
+        self.toggle_flicks = QCheckBox(tr("flicks"))
         self.toggle_flicks.setToolTip(
-            "Show flick-quality overlays: green = clean, red = overshoot/correction")
-        self.toggle_shots = QCheckBox("shots")
-        self.toggle_shots.setToolTip("Show an ✕ where each shot was fired")
+            "显示甩枪质量：绿色表示干净，红色表示过冲或二次修正")
+        self.toggle_shots = QCheckBox(tr("shots"))
+        self.toggle_shots.setToolTip("以 ✕ 标出每次射击的位置")
         for box in (self.toggle_path, self.toggle_flicks, self.toggle_shots):
             box.setChecked(True)
         self.toggle_path.toggled.connect(self._full.setVisible)
@@ -232,7 +233,7 @@ class TrajectoryReplay(QWidget):
                   self.toggle_path, self.toggle_flicks, self.toggle_shots):
             w.setEnabled(live)
         if not live:
-            self.btn.setText("Replay")
+            self.btn.setText(tr("Replay"))
 
     # ------------------------------------------------------------------
     def toggle(self) -> None:
@@ -243,12 +244,12 @@ class TrajectoryReplay(QWidget):
                 self._pos = 0.0
             self._clock_base = self._pos
             self._clock.start()
-            self.btn.setText("Stop")
+            self.btn.setText(tr("Stop"))
             self._timer.start()
 
     def stop(self) -> None:
         self._timer.stop()
-        self.btn.setText("Replay")
+        self.btn.setText(tr("Replay"))
 
     def _cycle_speed(self) -> None:
         order = [0.25, 0.5, 1.0]

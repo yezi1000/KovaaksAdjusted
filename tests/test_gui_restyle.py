@@ -107,7 +107,7 @@ def test_refresh_keeps_the_selected_scenario(qapp, settings):
     b.refresh()
     assert b.selected() == picked
 
-    b.sort_by.setCurrentText("Most runs")   # re-sorts, same rows
+    b.sort_by.setCurrentIndex(b.sort_by.findData("runs"))   # re-sorts, same rows
     assert b.selected() == picked
 
 
@@ -253,14 +253,14 @@ def test_a_failed_fix_does_not_render_as_applied(qapp, opt, monkeypatch):
 
     ok_row.show_outcome("mouse_accel applied")
     assert ok_row.result.status == "ok"
-    assert ok_row.fix_btn.text() == "Applied"
+    assert ok_row.fix_btn.text() == "已应用"
     assert not ok_row.fix_btn.isEnabled()
     assert _status_color("ok") in ok_row._dot.styleSheet()
     assert theme.current().good in ok_row._dot.styleSheet()
 
     bad_row.show_outcome("fix failed: Access is denied")
     assert bad_row.result.status == "bad", "a failure was recorded as success"
-    assert bad_row.fix_btn.text() != "Applied"
+    assert bad_row.fix_btn.text() != "已应用"
     assert bad_row.fix_btn.isEnabled(), "a transient failure must be retryable"
     assert theme.current().bad in bad_row._dot.styleSheet()
     assert "Access is denied" in bad_row.detail.text()

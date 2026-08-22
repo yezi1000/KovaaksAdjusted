@@ -37,6 +37,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .i18n import tr
+
 _SCROLL_MS = 350
 _COLUMN_MAX = 950   # editorial column width; the rails either side show backdrop
 
@@ -51,13 +53,13 @@ COLUMN_WIDTHS = {
     "wide": 1400,       # charts, tables, replay
 }
 _SECTION_WIDTH = {
-    "Dashboard": "default",
-    "Scenarios": "wide",
-    "Analysis": "wide",
-    "What changed": "wide",     # baseline-vs-now comparisons need the room
-    "Adaptability": "default",
-    "Optimizer": "default",
-    "How it learns": "prose",
+    tr("Dashboard"): "default",
+    tr("Scenarios"): "wide",
+    tr("Analysis"): "wide",
+    tr("What changed"): "wide",     # baseline-vs-now comparisons need the room
+    tr("Adaptability"): "default",
+    tr("Optimizer"): "default",
+    tr("How it learns"): "prose",
 }
 
 

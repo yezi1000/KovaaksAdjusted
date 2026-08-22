@@ -31,9 +31,11 @@ from ..adapt.archetype import detect_archetype, stamp_archetype
 from ..config import ADAPTIVE_SUFFIX, Settings
 from ..profile.player import PlayerProfile
 from . import theme
+from .i18n import archetype_name, tr
 from .onboarding import HintBar
 
-_COLS = ("Scenario", "Archetype", "Runs", "Accuracy", "Calibration", "Last played")
+_COLS = tuple(tr(label) for label in (
+    "Scenario", "Archetype", "Runs", "Accuracy", "Calibration", "Last played"))
 
 
 @dataclass
@@ -57,22 +59,26 @@ class ScenarioBrowser(QWidget):
         self._rows: list[_Row] = []
 
         hint = HintBar(settings, (
-            "Every scenario installed in KovaaK's, with what the adaptive "
-            "model knows about it. <b>Play</b> queues the adaptive task and "
-            "launches the game; <b>●</b> marks scenarios that already have an "
-            "adaptive variant."))
+            "这里显示 KovaaK's 中已安装的全部场景，以及自适应模型目前掌握的"
+            "训练数据。<b>开始训练</b>会把自适应任务加入队列并启动游戏；"
+            "<b>●</b> 表示该场景已经生成自适应版本。"))
 
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Search scenarios…")
+        self.search.setPlaceholderText(tr("Search scenarios…"))
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._apply_filter)
         self.arch_filter = QComboBox()
-        self.arch_filter.addItems(["All types", "clicking", "tracking", "switching"])
+        for value in ("all", "clicking", "tracking", "switching"):
+            self.arch_filter.addItem(
+                tr("All types") if value == "all" else archetype_name(value), value)
         self.arch_filter.currentIndexChanged.connect(self._apply_filter)
         self.sort_by = QComboBox()
-        self.sort_by.addItems(["Name", "Recently played", "Most runs"])
+        for label, value in (("Name", "name"),
+                             ("Recently played", "recent"),
+                             ("Most runs", "runs")):
+            self.sort_by.addItem(tr(label), value)
         self.sort_by.currentIndexChanged.connect(self._rebuild)
-        refresh = QPushButton("Refresh")
+        refresh = QPushButton(tr("Refresh"))
         refresh.clicked.connect(self.refresh)
 
         top = QHBoxLayout()
@@ -107,20 +113,19 @@ class ScenarioBrowser(QWidget):
         self.table.itemSelectionChanged.connect(self._selection_changed)
         self.table.itemDoubleClicked.connect(lambda _it: self._emit_play())
 
-        self.detail = QLabel("select a scenario")
+        self.detail = QLabel(tr("Select a scenario"))
         self.detail.setProperty("dim", True)
         self.detail.setWordWrap(True)
-        self.play_btn = QPushButton("▶  Play adaptive task")
+        self.play_btn = QPushButton(tr("▶  Play adaptive task"))
         self.play_btn.setProperty("accent", True)
         self.play_btn.setEnabled(False)
         self.play_btn.clicked.connect(self._emit_play)
-        self.watch_btn = QPushButton("Start adapting")
+        self.watch_btn = QPushButton(tr("Start adapting"))
         self.watch_btn.setEnabled(False)
         self.watch_btn.clicked.connect(self._emit_watch)
-        self.gen_btn = QPushButton("Generate variant")
+        self.gen_btn = QPushButton(tr("Generate variant"))
         self.gen_btn.setToolTip(
-            "Write/refresh the [Adaptive] .sce from the learned profile "
-            "without starting a session")
+            "依据当前训练模型写入或刷新 [Adaptive] .sce，不启动训练会话")
         self.gen_btn.setEnabled(False)
         self.gen_btn.clicked.connect(self._generate)
 
@@ -181,10 +186,10 @@ class ScenarioBrowser(QWidget):
         self._rebuild()
 
     def _sorted_rows(self) -> list[_Row]:
-        mode = self.sort_by.currentText()
-        if mode == "Recently played":
+        mode = self.sort_by.currentData()
+        if mode == "recent":
             return sorted(self._rows, key=lambda r: r.last_played, reverse=True)
-        if mode == "Most runs":
+        if mode == "runs":
             return sorted(self._rows, key=lambda r: r.runs, reverse=True)
         return sorted(self._rows, key=lambda r: r.name.lower())
 
@@ -204,12 +209,13 @@ class ScenarioBrowser(QWidget):
             name.setData(Qt.UserRole, row.name)
             if row.has_adaptive:
                 name.setForeground(theme_color(pal.accent))
-            arch = QTableWidgetItem(row.archetype)
+            arch = QTableWidgetItem(archetype_name(row.archetype))
+            arch.setData(Qt.UserRole, row.archetype)
             runs = QTableWidgetItem(str(row.runs) if row.runs else "—")
             acc = QTableWidgetItem(f"{row.accuracy:.0%}" if row.runs else "—")
             cal = QTableWidgetItem(f"{row.calibration:.0%}" if row.runs else "—")
             last = QTableWidgetItem(
-                row.last_played.replace("T", " ")[:16] if row.last_played else "never")
+                row.last_played.replace("T", " ")[:16] if row.last_played else tr("Never"))
             # Numeric columns are data: they get the mono face so digits sit
             # on one grid and the column scans vertically. In a proportional
             # face "27" and "115" are different widths and a long list stops
@@ -271,12 +277,12 @@ class ScenarioBrowser(QWidget):
 
     def _apply_filter(self) -> None:
         text = self.search.text().strip().lower()
-        arch = self.arch_filter.currentText()
+        arch = self.arch_filter.currentData()
         for i in range(self.table.rowCount()):
             name = (self.table.item(i, 0).data(Qt.UserRole) or "").lower()
-            row_arch = self.table.item(i, 1).text()
+            row_arch = self.table.item(i, 1).data(Qt.UserRole)
             hide = (text and text not in name) or \
-                (arch != "All types" and row_arch != arch)
+                (arch != "all" and row_arch != arch)
             self.table.setRowHidden(i, hide)
         self._fit_table_height()
         # Hiding the selected row drops it out of selectedItems(), so
@@ -298,19 +304,19 @@ class ScenarioBrowser(QWidget):
         for btn in (self.play_btn, self.watch_btn, self.gen_btn):
             btn.setEnabled(on)
         if not on:
-            self.detail.setText("select a scenario")
+            self.detail.setText(tr("Select a scenario"))
             return
         row = next((r for r in self._rows if r.name == name), None)
         if row is None:
             return
         if row.runs:
             self.detail.setText(
-                f"{row.archetype} · {row.runs} runs · accuracy "
-                f"{row.accuracy:.1%} · calibration {row.calibration:.0%}")
+                f"{archetype_name(row.archetype)} · {row.runs} 局 · 准确率 "
+                f"{row.accuracy:.1%} · 校准度 {row.calibration:.0%}")
         else:
             self.detail.setText(
-                f"{row.archetype} · never trained — Play creates the adaptive "
-                "variant and starts learning from run 1")
+                f"{archetype_name(row.archetype)} · 尚未训练 — 开始训练后会生成"
+                "自适应版本，并从第 1 局开始学习")
 
     def _emit_play(self) -> None:
         if self.selected():

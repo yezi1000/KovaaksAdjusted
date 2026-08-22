@@ -47,6 +47,7 @@ from ..optimize.watchdog import (
     unregister_startup,
 )
 from . import theme
+from .i18n import tr
 
 _STATUS_DOT = {"ok": "●", "warn": "●", "bad": "●", "info": "○", "unknown": "○"}
 
@@ -159,7 +160,7 @@ class _CheckRow(QFrame):
         grid.addWidget(title, 0, 1)
         grid.addWidget(self.detail, 1, 1)
         if result.can_fix:
-            self.fix_btn = QPushButton(result.fix_label or "Fix")
+            self.fix_btn = QPushButton(result.fix_label or "修复")
             if result.safe:
                 self.fix_btn.setProperty("accent", True)
             self.fix_btn.clicked.connect(lambda: on_fix(self))
@@ -175,7 +176,7 @@ class _CheckRow(QFrame):
         the row says why nothing has happened yet."""
         if hasattr(self, "fix_btn"):
             self.fix_btn.setEnabled(False)
-            self.fix_btn.setText("Applying…")
+            self.fix_btn.setText("正在应用…")
 
     # `SystemCheckup.apply_fix` turns any exception into "fix failed: …" and
     # hands it back through the SAME channel as a success, so the outcome
@@ -204,7 +205,7 @@ class _CheckRow(QFrame):
             # transient (a permission prompt declined, the game running) and
             # re-running is the obvious next move.
             self.fix_btn.setEnabled(not ok)
-            self.fix_btn.setText("Applied" if ok else "Retry")
+            self.fix_btn.setText("已应用" if ok else "重试")
 
 
 class OptimizerWindow(QWidget):
@@ -212,7 +213,7 @@ class OptimizerWindow(QWidget):
 
     def __init__(self, settings: Settings) -> None:
         super().__init__(None)
-        self.setWindowTitle("kovadapt — optimizer")
+        self.setWindowTitle("kovadapt — 性能优化器")
         # 720 tall regardless of the panel, on a window whose main content is
         # a twelve-row list ~860px long. Take the height the screen actually
         # has, capped so this never opens taller than the desktop it is on.
@@ -228,19 +229,19 @@ class OptimizerWindow(QWidget):
         self._suspended: list[_CheckRow] = []   # buttons parked during a batch
 
         # --- hardware summary -------------------------------------------
-        self.hw_label = QLabel("Scanning hardware…")
+        self.hw_label = QLabel("正在扫描硬件…")
         self.hw_label.setProperty("headline", True)
         self.hw_sub = QLabel("")
         self.hw_sub.setProperty("dim", True)
-        hw_box = QGroupBox("Detected hardware")
+        hw_box = QGroupBox(tr("Detected hardware"))
         v = QVBoxLayout(hw_box)
         v.addWidget(self.hw_label)
         v.addWidget(self.hw_sub)
 
         # --- checkup ------------------------------------------------------
-        self.scan_btn = QPushButton("Re-scan")
+        self.scan_btn = QPushButton(tr("Re-scan"))
         self.scan_btn.clicked.connect(self.rescan)
-        self.fix_safe_btn = QPushButton("Fix all safe items")
+        self.fix_safe_btn = QPushButton(tr("Fix all safe items"))
         self.fix_safe_btn.setProperty("accent", True)
         self.fix_safe_btn.setToolTip(
             "Runs every fix that is per-user, reversible, and admin-free. "
@@ -260,7 +261,8 @@ class OptimizerWindow(QWidget):
         rows_scroll.setWidget(self.rows_holder)
         rows_scroll.setWidgetResizable(True)
         rows_scroll.setFrameShape(QScrollArea.NoFrame)
-        check_box = QGroupBox("System checkup")
+        check_box = QGroupBox(tr("System checkup"))
+        check_box.setObjectName("systemCheckup")
         cv = QVBoxLayout(check_box)
         cv.addLayout(head)
         cv.addWidget(rows_scroll, 1)
@@ -270,12 +272,12 @@ class OptimizerWindow(QWidget):
         self._bridge.event.connect(self._log)
         self.watchdog = GameWatchdog(on_event=self._bridge.event.emit)
         self.wd_toggle = QCheckBox(
-            "Auto-tune on every game launch (High priority + free the input core)")
+            "每次启动游戏时自动优化（高优先级 + 释放输入处理核心）")
         self.wd_toggle.setToolTip(
             "Exactly what Process Lasso's persistent rules do, free. Runs while "
             "this app is open; enable the startup option to cover every session.")
         self.wd_toggle.toggled.connect(self._toggle_watchdog)
-        self.wd_startup = QCheckBox("Start the watchdog with Windows (background, no window)")
+        self.wd_startup = QCheckBox("随 Windows 启动后台监测器（无窗口）")
         self.wd_startup.setChecked(startup_registered())
         self.wd_startup.toggled.connect(self._toggle_startup)
         self.wd_log = QPlainTextEdit()
@@ -292,12 +294,13 @@ class OptimizerWindow(QWidget):
         # explanation.
         self.wd_log.hide()
         self.jitter_lbl = QLabel(
-            "Evidence: watch a session with telemetry on and per-run input "
-            "jitter shows up here, before vs after each auto-tune.")
+            "数据依据：开启鼠标遥测完成训练后，这里会显示每局输入抖动，"
+            "并对比自动优化前后的结果。")
         self.jitter_lbl.setProperty("dim", True)
         self.jitter_lbl.setWordWrap(True)
         self._jitter_runs: list[tuple[float, float]] = []   # (epoch, jitter_ms)
-        wd_box = QGroupBox("Watchdog (free Process Lasso replacement)")
+        wd_box = QGroupBox("后台监测器（Process Lasso 的免费替代方案）")
+        wd_box.setObjectName("watchdog")
         wv = QVBoxLayout(wd_box)
         wv.addWidget(self.wd_toggle)
         wv.addWidget(self.wd_startup)
@@ -307,7 +310,7 @@ class OptimizerWindow(QWidget):
         # --- advice -----------------------------------------------------------
         self.launch_label = QLabel(steam_launch_options(HardwareInfo()))
         self.launch_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        copy_btn = QPushButton("Copy")
+        copy_btn = QPushButton(tr("Copy"))
         copy_btn.setFixedWidth(70)
         copy_btn.clicked.connect(self._copy_launch)
         lrow = QHBoxLayout()
@@ -316,7 +319,7 @@ class OptimizerWindow(QWidget):
         skip_lines = "".join(
             f"<li><code>{flag}</code> — {why}</li>"
             for flag, why in skipped_launch_options())
-        skips = QLabel(f"<b>Skip these (myths):</b><ul>{skip_lines}</ul>")
+        skips = QLabel(f"<b>不建议使用的参数：</b><ul>{skip_lines}</ul>")
         skips.setTextFormat(Qt.RichText)
         skips.setWordWrap(True)
         skips.setProperty("dim", True)
@@ -325,7 +328,7 @@ class OptimizerWindow(QWidget):
         self.recs_label.setWordWrap(True)
         adv_inner = QWidget()
         av = QVBoxLayout(adv_inner)
-        av.addWidget(QLabel("Steam launch options (right-click KovaaK's > Properties):"))
+        av.addWidget(QLabel("Steam 启动选项（右键 KovaaK's → 属性）："))
         av.addLayout(lrow)
         av.addWidget(skips)
         av.addWidget(self.recs_label)
@@ -334,7 +337,8 @@ class OptimizerWindow(QWidget):
         adv_scroll.setWidget(adv_inner)
         adv_scroll.setWidgetResizable(True)
         adv_scroll.setFrameShape(QScrollArea.NoFrame)
-        adv_box = QGroupBox("Recommended for your hardware")
+        adv_box = QGroupBox(tr("Recommended for your hardware"))
+        adv_box.setObjectName("hardwareRecommendations")
         bv = QVBoxLayout(adv_box)
         bv.addWidget(adv_scroll)
 
@@ -399,7 +403,7 @@ class OptimizerWindow(QWidget):
         if self._fix is not None and self._fix.isRunning():
             return   # rebuilding the rows now would orphan the pending fixes
         self.scan_btn.setEnabled(False)
-        self.scan_btn.setText("Scanning…")
+        self.scan_btn.setText("正在扫描…")
         self._scan = _ScanWorker(self.s.kovaaks_root, parent=self)
         self._scan.done.connect(self._on_scan)
         self._scan.start()
@@ -408,7 +412,7 @@ class OptimizerWindow(QWidget):
         self.hw = hw
         self.checkup = SystemCheckup(self.s.kovaaks_root, hw)
         self.scan_btn.setEnabled(True)
-        self.scan_btn.setText("Re-scan")
+        self.scan_btn.setText(tr("Re-scan"))
 
         if hw.cpu_name or hw.gpu_name:
             self.hw_label.setText(f"{hw.cpu_name or 'unknown CPU'}  ·  "
@@ -423,7 +427,7 @@ class OptimizerWindow(QWidget):
             bits.append("Windows 11" if hw.is_windows_11 else "Windows 10")
             self.hw_sub.setText("  ·  ".join(bits))
         else:
-            self.hw_label.setText("Hardware detection unavailable")
+            self.hw_label.setText("无法检测硬件")
             self.hw_sub.setText("; ".join(hw.notes))
 
         # rebuild check rows
@@ -472,7 +476,7 @@ class OptimizerWindow(QWidget):
         n = len(self._pending_safe())
         self.fix_safe_btn.setEnabled(n > 0)
         self.fix_safe_btn.setText(
-            f"Fix all safe items ({n})" if n else "Fix all safe items")
+            f"修复全部安全项目（{n}）" if n else tr("Fix all safe items"))
 
     def _fix_row(self, row: _CheckRow) -> None:
         self._start_fixes([row])

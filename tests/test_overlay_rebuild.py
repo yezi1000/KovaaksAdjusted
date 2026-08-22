@@ -157,6 +157,8 @@ def test_session_average_fallback_is_labelled(qapp, settings):
 
 
 def test_start_session_clears_the_previous_one(qapp, settings):
+    from kovadapt.gui.i18n import tr
+
     ov = OverlayWindow(settings)
     ov.start_session("A [Adaptive]")
     ov.on_report(_report(0.61), _profile(ewma=0.61))
@@ -165,7 +167,7 @@ def test_start_session_clears_the_previous_one(qapp, settings):
     assert ov.spark.reference() == (None, "base")
     assert ov.spark.levels() == []
     assert ov.deck.row_text("acc") == "—"
-    assert ov.status.text() == "watching"
+    assert ov.status.text() == tr("watching")
     ov.close()
 
 
@@ -182,7 +184,7 @@ def test_deck_reports_the_run_against_the_frozen_baseline(qapp, settings):
     assert ov.deck.row_text("size") == "1.25x"
     assert ov.deck.row_text("move") == "0.30"
     assert ov.deck.row_text("input") == "998Hz ±0.4ms"
-    assert ov.status.text() == "watching · 1 run"
+    assert ov.status.text() == "正在分析 · 1 局"
     ov.close()
 
 

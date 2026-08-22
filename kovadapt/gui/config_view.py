@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import Settings
+from .i18n import archetype_name, tr
 from .onboarding import HintBar
 
 # Override keys editable per archetype (subset of Settings fields that map
@@ -39,11 +40,11 @@ from .onboarding import HintBar
 # (correctly) refuses to paint a clamped position next to an unclamped number.
 # Each range matches that field's own global spin above.
 _ARCH_KEYS = (
-    ("target_accuracy_low", "Accuracy low", 0.30, 0.99),
-    ("target_accuracy_high", "Accuracy high", 0.35, 1.00),
-    ("size_learning_rate", "Size learning rate", 0.05, 3.00),
-    ("min_movement", "Min movement", 0.00, 1.00),
-    ("focus_weight", "Focus weight", 0.00, 0.90),
+    ("target_accuracy_low", "准确率下限", 0.30, 0.99),
+    ("target_accuracy_high", "准确率上限", 0.35, 1.00),
+    ("size_learning_rate", "目标尺寸调整速度", 0.05, 3.00),
+    ("min_movement", "最低移动强度", 0.00, 1.00),
+    ("focus_weight", "弱区训练权重", 0.00, 0.90),
 )
 _ARCH_EDITABLE = ("tracking", "switching")   # clicking is the baseline
 
@@ -105,11 +106,11 @@ class ConfigView(QWidget):
         cm_cap.setWordWrap(True)
         # "&&" is a literal ampersand. A bare "&" marks the next character as a
         # keyboard mnemonic, which is why this rendered as "Mouse _sensitivity".
-        mouse = QGroupBox("Mouse && sensitivity")
+        mouse = QGroupBox(tr("Mouse & sensitivity"))
         f = _form(mouse)
-        f.addRow("Mouse DPI", self.dpi)
-        f.addRow("In-game sensitivity", self.sens)
-        f.addRow("cm per 360°", self.cm360)
+        f.addRow("鼠标 DPI", self.dpi)
+        f.addRow("游戏内灵敏度", self.sens)
+        f.addRow("转身 360° 所需厘米数", self.cm360)
         f.addRow(cm_cap)
         self.dpi.valueChanged.connect(self._update_cm360)
         self.sens.valueChanged.connect(self._update_cm360)
@@ -121,41 +122,41 @@ class ConfigView(QWidget):
         self.lr = _dspin(s.size_learning_rate, 0.1, 3.0, 0.1)
         self.scale_min = _dspin(s.min_target_scale, 0.1, 1.0)
         self.scale_max = _dspin(s.max_target_scale, 1.0, 5.0)
-        diff = QGroupBox("Difficulty controller")
+        diff = QGroupBox(tr("Difficulty controller"))
         f = _form(diff)
-        f.addRow("Accuracy sweet spot — low", self.acc_lo)
-        f.addRow("Accuracy sweet spot — high", self.acc_hi)
-        f.addRow("Size learning rate", self.lr)
-        f.addRow("Min target scale", self.scale_min)
-        f.addRow("Max target scale", self.scale_max)
+        f.addRow("目标准确率下限", self.acc_lo)
+        f.addRow("目标准确率上限", self.acc_hi)
+        f.addRow("尺寸调整速度", self.lr)
+        f.addRow("目标最小缩放", self.scale_min)
+        f.addRow("目标最大缩放", self.scale_max)
 
         # weakness targeting
         self.cols = _ispin(s.region_cols, 2, 5)
         self.rows = _ispin(s.region_rows, 1, 5)
         self.focus = _dspin(s.focus_weight, 0.0, 0.9)
         self.blend = _dspin(s.telemetry_blend, 0.0, 1.0)
-        reg = QGroupBox("Weak-region targeting (bandit)")
+        reg = QGroupBox(tr("Weak-region targeting (bandit)"))
         f = _form(reg)
-        f.addRow("Grid columns", self.cols)
-        f.addRow("Grid rows", self.rows)
-        f.addRow("Focus weight (spawn mass on weak region)", self.focus)
-        f.addRow("Telemetry blend (flick evidence weight)", self.blend)
+        f.addRow("网格列数", self.cols)
+        f.addRow("网格行数", self.rows)
+        f.addRow("弱区目标生成权重", self.focus)
+        f.addRow("鼠标遥测证据权重", self.blend)
 
         # stochastic movement
         self.theta = _dspin(s.ou_theta, 0.05, 2.0)
         self.sigma = _dspin(s.ou_sigma, 0.0, 1.5)
         self.mov_min = _dspin(s.min_movement, 0.0, 1.0)
         self.mov_max = _dspin(s.max_movement, 0.0, 1.0)
-        mov = QGroupBox("Anti-autopilot movement (Ornstein-Uhlenbeck)")
+        mov = QGroupBox(tr("Anti-autopilot movement (Ornstein-Uhlenbeck)"))
         f = _form(mov)
-        f.addRow("Mean reversion θ", self.theta)
-        f.addRow("Diffusion σ", self.sigma)
-        f.addRow("Min movement intensity", self.mov_min)
-        f.addRow("Max movement intensity", self.mov_max)
+        f.addRow("均值回归 θ", self.theta)
+        f.addRow("扩散强度 σ", self.sigma)
+        f.addRow("最低移动强度", self.mov_min)
+        f.addRow("最高移动强度", self.mov_max)
 
         # telemetry / clips
         self.skip_splash_cb = QCheckBox(
-            "Skip the loading screen (jump straight to the window)")
+            "跳过加载画面，直接进入主窗口")
         self.skip_splash_cb.setChecked(bool(getattr(s, "skip_splash", False)))
         # Motion intensity is one dial rather than a code change: taste is
         # personal, and on a 240 Hz panel a dropped frame is visible.
@@ -171,20 +172,21 @@ class ConfigView(QWidget):
             "Full animates the backdrop eye and every reveal. Reduced keeps the "
             "reveals that carry meaning (a run landing) and drops ambient loops. "
             "Off paints final states with no animation at all.")
-        self.telemetry = QCheckBox("Record raw mouse telemetry while watching")
+        self.telemetry = QCheckBox(tr("Record raw mouse telemetry while watching"))
         self.telemetry.setChecked(s.telemetry_enabled)
-        self.clips = QCheckBox("Capture video clips of notable moments (needs kovadapt[clips])")
+        self.clips = QCheckBox(
+            tr("Capture video clips of notable moments (needs kovadapt[clips])"))
         self.clips.setChecked(s.clips_enabled)
         self.clip_fps = _ispin(s.clip_fps, 10, 60)
         self.clip_buf = _dspin(s.clip_buffer_seconds, 30.0, 300.0, 10.0, 0)
-        tel = QGroupBox("Telemetry && clips")
+        tel = QGroupBox(tr("Telemetry & clips"))
         f = _form(tel)
         f.addRow(self.skip_splash_cb)
-        f.addRow("Motion", self.motion)
+        f.addRow("界面动效", self.motion)
         f.addRow(self.telemetry)
         f.addRow(self.clips)
-        f.addRow("Clip FPS", self.clip_fps)
-        f.addRow("Clip ring buffer (s)", self.clip_buf)
+        f.addRow("录像帧率", self.clip_fps)
+        f.addRow("录像循环缓冲（秒）", self.clip_buf)
 
         # advanced engine internals
         self.half_life = _dspin(
@@ -208,7 +210,7 @@ class ConfigView(QWidget):
         self.decay = _dspin(
             s.bandit_posterior_decay, 0.0, 0.5, 0.01, 2,
             "Per-run forgetting toward the prior so fixed weaknesses re-open (0 = never forget).")
-        adv = QGroupBox("Advanced engine internals")
+        adv = QGroupBox(tr("Advanced engine internals"))
         f = _form(adv)
         f.addRow("EWMA half-life (runs)", self.half_life)
         f.addRow("Size–speed coupling", self.coupling)
@@ -219,20 +221,20 @@ class ConfigView(QWidget):
         f.addRow("Bandit posterior decay", self.decay)
 
         # trace-informed dodge
-        self.dodge_en = QCheckBox("Targets strafe longer toward your weak flick side")
+        self.dodge_en = QCheckBox("让目标更常向你的弱侧移动")
         self.dodge_en.setChecked(s.dodge_bias_enabled)
         self.dodge_gain = _dspin(
             s.dodge_bias_gain, 0.0, 2.0, 0.1, 1,
             "Scales measured left/right bias into strafe asymmetry.")
-        dodge = QGroupBox("Trace-informed dodge direction")
+        dodge = QGroupBox(tr("Trace-informed dodge direction"))
         f = _form(dodge)
         f.addRow(self.dodge_en)
-        f.addRow("Bias gain", self.dodge_gain)
+        f.addRow("方向偏差增益", self.dodge_gain)
 
         # fatigue
-        self.fat_en = QCheckBox("Detect flick-quality decay and suggest breaks")
+        self.fat_en = QCheckBox("检测甩枪质量下降并建议休息")
         self.fat_en.setChecked(s.fatigue_detection_enabled)
-        self.fat_ease = QCheckBox("Ease difficulty while fatigued (bigger, calmer targets)")
+        self.fat_ease = QCheckBox("疲劳时降低难度（目标更大、移动更平缓）")
         self.fat_ease.setChecked(s.fatigue_easing)
         self.fat_sens = _dspin(
             s.fatigue_sensitivity, 0.1, 3.0, 0.1, 1,
@@ -240,16 +242,16 @@ class ConfigView(QWidget):
         self.fat_runs = _ispin(
             s.fatigue_min_runs, 2, 20,
             "Runs with telemetry needed before the trend is trusted.")
-        fat = QGroupBox("Session fatigue")
+        fat = QGroupBox(tr("Session fatigue"))
         f = _form(fat)
         f.addRow(self.fat_en)
         f.addRow(self.fat_ease)
-        f.addRow("Sensitivity", self.fat_sens)
-        f.addRow("Min runs", self.fat_runs)
+        f.addRow("检测敏感度", self.fat_sens)
+        f.addRow("最少局数", self.fat_runs)
 
         # per-archetype overrides
         self.arch_en = QCheckBox(
-            "Adapt differently per task type (auto-detected: clicking / tracking / switching)")
+            "按训练类型分别适配（自动识别：点击 / 跟枪 / 目标切换）")
         self.arch_en.setChecked(s.archetype_enabled)
         self.arch_spins: dict[str, dict[str, QDoubleSpinBox]] = {}
         # A spin with no override shows the global value it inherits, which is
@@ -258,7 +260,7 @@ class ConfigView(QWidget):
         # _save() can tell "inherited" from "chosen".
         self._arch_explicit: dict[str, set[str]] = {}
         self._arch_base: dict[str, dict[str, float]] = {}
-        arch = QGroupBox("Per-archetype overrides (clicking is the baseline)")
+        arch = QGroupBox(tr("Per-archetype overrides (clicking is the baseline)"))
         av = QVBoxLayout(arch)
         av.setContentsMargins(16, 12, 16, 16)
         av.setSpacing(14)
@@ -270,16 +272,16 @@ class ConfigView(QWidget):
                 spins[key] = _dspin(float(ov.get(key, getattr(s, key))), lo, hi)
             self.arch_spins[name] = spins
             self._remember_arch(name, ov)
-            box = QGroupBox(name)
+            box = QGroupBox(archetype_name(name))
             row = _form(box)
             for key, cap, _lo, _hi in _ARCH_KEYS:
                 row.addRow(cap, spins[key])
             av.addWidget(box)
 
-        save = QPushButton("Save settings")
+        save = QPushButton(tr("Save settings"))
         save.setProperty("accent", True)
         save.clicked.connect(self._save)
-        reset = QPushButton("Reset to defaults")
+        reset = QPushButton(tr("Reset to defaults"))
         reset.setToolTip("Restore every knob to the shipped defaults (paths are kept). "
                          "Takes effect after Save.")
         reset.clicked.connect(self._reset)

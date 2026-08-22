@@ -53,16 +53,18 @@ def _expected_sections() -> list[str]:
     and Adaptability (it reads per TASK, where Analysis reads per run), and
     'How it learns' is always last. Both appear only once their module
     exists, so this stays true while either is authored separately."""
-    names = ["Dashboard", "Scenarios", "Analysis"]
+    from kovadapt.gui.i18n import tr
+
+    names = [tr("Dashboard"), tr("Scenarios"), tr("Analysis")]
     try:
         import kovadapt.gui.changes_view  # noqa: F401
-        names.append("What changed")
+        names.append(tr("What changed"))
     except ImportError:
         pass
-    names += ["Adaptability", "Optimizer"]
+    names += [tr("Adaptability"), tr("Optimizer")]
     try:
         import kovadapt.gui.ml_page  # noqa: F401
-        names.append("How it learns")
+        names.append(tr("How it learns"))
     except ImportError:
         pass
     return names
@@ -117,6 +119,7 @@ def test_editorial_column_caps_content_width(qapp, settings):
 def test_sections_use_their_content_measure(qapp, settings):
     """Prose must stay narrower than the data sections."""
     from kovadapt.gui.app import MainWindow
+    from kovadapt.gui.i18n import tr
     from kovadapt.gui.shell import COLUMN_WIDTHS
     from kovadapt.gui.theme import ThemeManager
 
@@ -124,11 +127,11 @@ def test_sections_use_their_content_measure(qapp, settings):
     win = MainWindow(settings, themes)
     widths = {win.space.names()[i]: win.space.section_at(i).max_width
               for i in range(win.space.count())}
-    assert widths["Analysis"] == COLUMN_WIDTHS["wide"]
-    assert widths["Dashboard"] == COLUMN_WIDTHS["default"]
-    if "How it learns" in widths:
-        assert widths["How it learns"] == COLUMN_WIDTHS["prose"]
-        assert widths["How it learns"] < widths["Analysis"]
+    assert widths[tr("Analysis")] == COLUMN_WIDTHS["wide"]
+    assert widths[tr("Dashboard")] == COLUMN_WIDTHS["default"]
+    if tr("How it learns") in widths:
+        assert widths[tr("How it learns")] == COLUMN_WIDTHS["prose"]
+        assert widths[tr("How it learns")] < widths[tr("Analysis")]
     win.close()
     win.deleteLater()   # close() only hides it
 
@@ -188,6 +191,7 @@ def test_report_badges_analysis_nav_link(qapp, settings):
 
     from kovadapt.analysis.report import RunReport
     from kovadapt.gui.app import MainWindow
+    from kovadapt.gui.i18n import tr
     from kovadapt.gui.theme import ThemeManager
 
     themes = ThemeManager(qapp, settings)
@@ -201,10 +205,10 @@ def test_report_badges_analysis_nav_link(qapp, settings):
         summary_text="30 kills at 61% accuracy.")
     idx = win.space.index_of(win.analysis)
     win.dashboard.report_ready.emit(rep)            # full _on_report path
-    assert win.nav.links()[idx].text() == "Analysis •"
+    assert win.nav.links()[idx].text() == f"{tr('Analysis')} •"
     win.space.scroll_to(idx, animated=False)        # into view clears the dot
     assert win.space.current_index() == idx
-    assert win.nav.links()[idx].text() == "Analysis"
+    assert win.nav.links()[idx].text() == tr("Analysis")
     win.close()
     win.deleteLater()   # close() only hides it
 
@@ -319,6 +323,7 @@ def test_hint_bars_tuck_away(qapp, settings):
 
 
 def test_welcome_dialog_completion_marks_done(qapp, settings):
+    from kovadapt.gui.i18n import tr
     from kovadapt.gui.onboarding import WelcomeDialog
 
     settings.onboarding_done = False
@@ -327,7 +332,7 @@ def test_welcome_dialog_completion_marks_done(qapp, settings):
     assert not dlg.again.isChecked()     # finishing must not re-show by default
     for _ in range(dlg.pages.count() - 1):
         dlg._next()
-    assert dlg.next_btn.text() == "Get started"
+    assert dlg.next_btn.text() == tr("Get started")
     dlg._next()                          # accept() on the last page
     assert settings.onboarding_done is True
     dlg.deleteLater()
@@ -475,6 +480,7 @@ def test_filtering_the_selection_off_screen_disarms_the_actions(qapp, settings):
     calls `_selection_changed`, the typing and archetype-filter path did not.
     """
     from kovadapt.gui.browser import ScenarioBrowser
+    from kovadapt.gui.i18n import tr
 
     for n in ("Alpha Track Long", "Beta 1wall Click", "Gamma Switch"):
         (settings.scenarios_dir / f"{n}.sce").write_text("[Scenario]\n")
@@ -488,7 +494,7 @@ def test_filtering_the_selection_off_screen_disarms_the_actions(qapp, settings):
     assert b.selected() == "", "a hidden row is still reported as selected"
     for btn in (b.play_btn, b.watch_btn, b.gen_btn):
         assert not btn.isEnabled(), "armed for something invisible"
-    assert b.detail.text() == "select a scenario"
+    assert b.detail.text() == tr("Select a scenario")
 
     b.search.setText("")                       # and it comes back
     assert b.selected()

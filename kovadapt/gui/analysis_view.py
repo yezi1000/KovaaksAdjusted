@@ -49,14 +49,18 @@ from ..analysis.insights import (
     generate_insights,
 )
 from ..analysis.movement import MIN_FLICK_DEG, movement_heatmap, segment_flicks
-from ..analysis.report import (apply_flick_metrics, input_degraded,
-                               summary_text_for)
+from ..analysis.report import (
+    RunReport,
+    apply_flick_metrics,
+    input_degraded,
+    summary_text_for,
+)
 from ..analysis.sens import min_flick_counts
-from ..analysis.report import RunReport
 from ..config import ADAPTIVE_SUFFIX, Settings
 from ..profile.player import PlayerProfile
 from ..telemetry.trace import MouseTrace
 from . import theme, viz
+from .i18n import tr
 from .onboarding import HintBar
 from .replay import TrajectoryReplay
 
@@ -177,13 +181,13 @@ class _InsightCard(QFrame):
         head = QLabel(f"<span style='color:{color}'>●</span>  <b>{ins.title}</b>"
                       f"  <span style='color:{pal.fg_dim}'>{ins.confidence}</span>")
         head.setTextFormat(Qt.RichText)
-        body = QLabel(f"{ins.body}<br><b>Suggestion:</b> {ins.prescription}")
+        body = QLabel(f"{ins.body}<br><b>训练建议：</b> {ins.prescription}")
         body.setTextFormat(Qt.RichText)
         body.setWordWrap(True)
-        why = QLabel(f"why: {ins.reasoning}")
+        why = QLabel(f"依据：{ins.reasoning}")
         why.setWordWrap(True)
         why.setProperty("dim", True)
-        cites = QLabel(f"{len(ins.sources)} source{'s' if len(ins.sources) != 1 else ''}")
+        cites = QLabel(f"{len(ins.sources)} 个来源")
         cites.setProperty("dim", True)
         cites.setToolTip("\n".join(ins.sources))
         lay = QVBoxLayout(self)
@@ -490,15 +494,15 @@ class AnalysisView(QWidget):
         self._levelling = False
 
         # header
-        self.title = QLabel("No run analyzed yet")
+        self.title = QLabel(tr("No run analyzed yet"))
         self.title.setProperty("headline", True)
-        self.summary = QLabel("Finish a run while watching (or open a saved report).")
+        self.summary = QLabel(tr("Finish a run while watching (or open a saved report)."))
         self.summary.setWordWrap(True)
         # Secondary now: the strip below carries the numbers this line opens
         # with, so it reads as the caption to the headline rather than a
         # second copy of the run.
         self.summary.setProperty("dim", True)
-        open_btn = QPushButton("Open report…")
+        open_btn = QPushButton(tr("Open report…"))
         open_btn.clicked.connect(self._open_dialog)
 
         head = QHBoxLayout()
@@ -517,7 +521,7 @@ class AnalysisView(QWidget):
         self.kpis: dict[str, _KpiTile] = {}
         for key, cap in (("accuracy", "accuracy"), ("kills", "kills"),
                          ("pace", "pace"), ("flick", "mean flick")):
-            tile = _KpiTile(cap)
+            tile = _KpiTile(tr(cap))
             self.kpis[key] = tile
             kpi_lay.addWidget(tile, 1)
 
@@ -568,11 +572,11 @@ class AnalysisView(QWidget):
         self.moments.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.moments.setResizeMode(QListWidget.Adjust)
         self.moments.currentRowChanged.connect(self._select_moment)
-        self.full_btn = QPushButton("Whole run")
+        self.full_btn = QPushButton(tr("Whole run"))
         self.full_btn.setEnabled(False)
-        self.full_btn.setToolTip("Replay the whole run instead of one moment")
+        self.full_btn.setToolTip("回放整局鼠标轨迹，而不是单个关键片段")
         self.full_btn.clicked.connect(self._show_full_run)
-        self.clip_btn = QPushButton("Play video clip")
+        self.clip_btn = QPushButton(tr("Play video clip"))
         self.clip_btn.setEnabled(False)
         self.clip_btn.clicked.connect(self._play_clip)
         self.clip_hint = QLabel("")           # why clips are off, when they are
@@ -585,13 +589,12 @@ class AnalysisView(QWidget):
         # beside them explained themselves perfectly well. The sentence
         # already existed — replay.clear() takes one — it was just never
         # reachable except through show_report.
-        self.replay.clear("no run loaded yet — finish a run, or open a saved "
-                          "report from the header")
+        self.replay.clear("尚未加载训练数据 — 请完成一局，或从上方打开保存的报告")
         empty = QListWidgetItem(_MOMENTS_EMPTY)
         empty.setFlags(Qt.NoItemFlags)          # not selectable: it is not a moment
         self.moments.addItem(empty)
 
-        mo_box = QGroupBox("Notable moments")
+        mo_box = QGroupBox(tr("Notable moments"))
         mo_lay = QVBoxLayout(mo_box)
         mo_lay.addWidget(self.moments, 1)
         btn_row = QHBoxLayout()
@@ -600,7 +603,7 @@ class AnalysisView(QWidget):
         mo_lay.addLayout(btn_row)
         mo_lay.addWidget(self.clip_hint)
         self._update_clip_state(-1)
-        rep_box = QGroupBox("Trajectory replay")
+        rep_box = QGroupBox(tr("Trajectory replay"))
         rep_lay = QVBoxLayout(rep_box)
         rep_lay.addWidget(self.replay)
         self.detail = QSplitter(Qt.Horizontal)
@@ -610,7 +613,8 @@ class AnalysisView(QWidget):
         self.detail.setMinimumHeight(380)
 
         # ---- coach last: folded to its two most severe cards
-        self.coach_box = QGroupBox("Coach — every insight shows its evidence and sources")
+        self.coach_box = QGroupBox(
+            tr("Coach — every insight shows its evidence and sources"))
         self.coach_lay = QVBoxLayout(self.coach_box)
         self.coach_lay.setSpacing(10)
         self.coach_box.hide()

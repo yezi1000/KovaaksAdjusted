@@ -851,7 +851,7 @@ def test_the_page_explains_itself_before_any_run_is_loaded(qapp, settings):
         "the placeholder can be selected, so it reads as a moment")
 
     assert view.replay.info.text(), "the replay canvas says nothing"
-    assert "no run loaded" in view.replay.info.text().lower()
+    assert "尚未加载" in view.replay.info.text()
     view.deleteLater()
 
 

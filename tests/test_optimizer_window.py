@@ -107,7 +107,7 @@ def _built(settings, qapp, height: int = FLOOR_H) -> OptimizerWindow:
 
 
 def _boxes(w) -> dict[str, QGroupBox]:
-    return {b.title().split(" (")[0]: b for b in w.findChildren(QGroupBox)}
+    return {b.objectName() or b.title(): b for b in w.findChildren(QGroupBox)}
 
 
 def _checkup_viewport(w) -> int:
@@ -115,7 +115,7 @@ def _checkup_viewport(w) -> int:
         par = sc.parent()
         while par is not None and not isinstance(par, QGroupBox):
             par = par.parent()
-        if par is not None and "checkup" in par.title().lower():
+        if par is not None and par.objectName() == "systemCheckup":
             return sc.viewport().height()
     raise AssertionError("no scroll area inside the System checkup box")
 
@@ -130,10 +130,10 @@ def test_the_checkup_gets_more_room_than_the_boxes_beside_it(qapp, settings):
     boxes = _boxes(w)
 
     assert vp >= 190, f"the checkup opens as a {vp}px slot at the floor size"
-    assert vp > boxes["Watchdog"].height(), (
+    assert vp > boxes["watchdog"].height(), (
         f"checkup viewport {vp} is no bigger than the un-stretched watchdog "
-        f"box {boxes['Watchdog'].height()}")
-    assert boxes["System checkup"].height() > boxes["Recommended for your hardware"].height(), (
+        f"box {boxes['watchdog'].height()}")
+    assert boxes["systemCheckup"].height() > boxes["hardwareRecommendations"].height(), (
         "reference prose is given more room than the list this window is for")
     w.shutdown()
 

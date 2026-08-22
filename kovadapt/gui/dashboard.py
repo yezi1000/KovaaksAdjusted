@@ -39,12 +39,13 @@ from ..config import ADAPTIVE_SUFFIX, Settings
 from ..profile.player import PlayerProfile
 from . import theme, viz
 from .ascii_art import CatSlider
+from .i18n import tr
 from .onboarding import HintBar
 from .overlay import OverlayWindow
 from .workers import WatcherWorker
 
-LOG_LABEL = "[ log ]"
-LOG_UNREAD = "[ log • ]"        # a line landed while the disclosure was shut
+LOG_LABEL = "[ 日志 ]"
+LOG_UNREAD = "[ 日志 • ]"        # a line landed while the disclosure was shut
 
 FORM_WINDOW = 5          # runs averaged into the "recent" side of FORM
 FORM_MIN_RUNS = 3        # below this there is no recent window worth naming
@@ -338,13 +339,11 @@ class Dashboard(QWidget):
         self.overlay = OverlayWindow(settings)
 
         hint = HintBar(settings, (
-            "Pick a scenario, then <b>Play adaptive task</b> — kovadapt watches "
-            "your runs and regenerates the <b>[Adaptive]</b> variant between "
-            "them. The three numerals below read this scenario's model: "
-            "<b>READINESS</b> is how calibrated it is, <b>FORM</b> your recent "
-            "accuracy against your own baseline, <b>LOAD</b> this session's "
-            "fatigue. Each one says what it was computed from. Mouse telemetry "
-            "records automatically while a session runs (the <b>REC</b> dot)."))
+            "选择场景后点击<b>开始自适应训练</b>。kovadapt 会监测每一局，"
+            "并在局间重新生成 <b>[Adaptive]</b> 版本。下方三个指标分别表示："
+            "<b>准备度</b>（模型校准程度）、<b>近期状态</b>（相对个人基线的近期"
+            "准确率）和<b>训练负荷</b>（本次训练的疲劳程度）。训练开始后会"
+            "自动记录鼠标遥测，界面以 <b>REC</b> 圆点提示。"))
 
         # ------------------------------------------------- the three heroes
         self.heroes: dict[str, HeroStat] = {}
@@ -352,19 +351,16 @@ class Dashboard(QWidget):
         hero_row.setSpacing(14)
         for key, name in (("readiness", "Readiness"), ("form", "Form"),
                           ("load", "Load")):
-            card = HeroStat(name)
+            card = HeroStat(tr(name))
             self.heroes[key] = card
             hero_row.addWidget(card, 1)
 
         # ------------------------------------------------- the one trend
-        self.trend = viz.AsciiTrend(title="accuracy per run · this scenario",
+        self.trend = viz.AsciiTrend(title="每局准确率 · 当前场景",
                                     fmt="{:.0%}")
         self.trend_caption = QLabel(
-            "Every run of this scenario, oldest on the left, newest tagged. "
-            "The adaptive loop should bend this upward without letting it pin "
-            "at 100% — the size controller holds accuracy inside your "
-            "archetype's band, so the line is meant to live in a corridor, "
-            "not to climb forever.")
+            "左侧为较早的训练，右侧为最新一局。自适应系统会调整目标大小，"
+            "让准确率维持在适合当前训练类型的区间，因此曲线不需要一直冲向 100%。")
         self.trend_caption.setWordWrap(True)
         self.trend_caption.setProperty("dim", True)
         # A sparkline reads at a glance; past ~220px the extra height is just
@@ -378,28 +374,28 @@ class Dashboard(QWidget):
         tv.addWidget(self.trend_caption)
 
         # ---------------------------------------------------- play controls
-        self.install_lbl = QLabel("checking install…")
+        self.install_lbl = QLabel("正在检查安装状态…")
         self.install_lbl.setProperty("dim", True)
-        self.launch_btn = QPushButton("Launch KovaaK's")
+        self.launch_btn = QPushButton(tr("Launch KovaaK's"))
         self.launch_btn.clicked.connect(self._launch_game)
-        self.play_btn = QPushButton("▶  Play adaptive task")
+        self.play_btn = QPushButton(tr("▶  Play adaptive task"))
         self.play_btn.setProperty("accent", True)
         self.play_btn.setToolTip(
-            "Start watching, queue the adaptive playlist, and launch KovaaK's "
-            "— in-game, open Playlists → kovadapt adaptive to play")
+            "开始记录，加入自适应播放列表并启动 KovaaK's。进入游戏后打开 "
+            "Playlists → kovadapt adaptive 开始训练")
         self.play_btn.clicked.connect(self.play)
 
         self.scenario = QComboBox()
         self.scenario.setEditable(True)
-        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn = QPushButton(tr("Refresh"))
         self.refresh_btn.clicked.connect(self.refresh_scenarios)
-        self.start_btn = QPushButton("Start adapting")
+        self.start_btn = QPushButton(tr("Start adapting"))
         self.start_btn.clicked.connect(self.toggle)
 
         # full-width Play panel: the column's lead panel, generous rows
         row1 = QHBoxLayout()
         row1.setSpacing(10)
-        row1.addWidget(QLabel("Scenario:"))
+        row1.addWidget(QLabel(tr("Scenario:")))
         row1.addWidget(self.scenario, 1)
         row1.addWidget(self.refresh_btn)
         row1.addWidget(self.start_btn)
@@ -411,7 +407,7 @@ class Dashboard(QWidget):
         row2.addWidget(self.rec_lbl)
         row2.addWidget(self.launch_btn)
         row2.addWidget(self.play_btn)
-        play_box = QGroupBox("Play")
+        play_box = QGroupBox(tr("Play"))
         pv = QVBoxLayout(play_box)
         pv.setContentsMargins(14, 12, 14, 14)
         pv.setSpacing(12)
@@ -419,19 +415,18 @@ class Dashboard(QWidget):
         pv.addLayout(row2)
 
         # -------------------------------------------------- overlay controls
-        self.ov_toggle = QPushButton("Overlay")
+        self.ov_toggle = QPushButton(tr("Overlay"))
         self.ov_toggle.setCheckable(True)
         self.ov_toggle.setToolTip(
-            "Always-on-top session card over the game (Borderless/Windowed only)")
+            "在游戏画面上方显示训练状态卡片（仅限无边框或窗口模式）")
         self.ov_toggle.toggled.connect(self._toggle_overlay)
-        self.ov_unlock = QPushButton("Unlock")
+        self.ov_unlock = QPushButton(tr("Unlock"))
         self.ov_unlock.setCheckable(True)
-        self.ov_unlock.setToolTip("Unlock to drag the overlay into place; lock "
-                                  "to make it click-through again")
+        self.ov_unlock.setToolTip("解锁后可以拖动浮窗；锁定后鼠标点击会穿透浮窗")
         self.ov_unlock.toggled.connect(self._unlock_overlay)
         self.ov_opacity = CatSlider(30, 100)
         self.ov_opacity.setValue(int(settings.overlay_opacity * 100))
-        self.ov_opacity.setToolTip("Overlay opacity — the cat walks it there")
+        self.ov_opacity.setToolTip("调整浮窗透明度")
         self.ov_opacity.valueChanged.connect(
             lambda v: self.overlay.set_opacity(v / 100))
         # Debounced persist: keyboard/wheel changes never fire sliderReleased.
@@ -441,12 +436,12 @@ class Dashboard(QWidget):
         self._opacity_save.timeout.connect(self._save_settings)
         self.ov_opacity.valueChanged.connect(
             lambda _v: self._opacity_save.start())
-        self.ov_auto = QCheckBox("Show when a session starts")
+        self.ov_auto = QCheckBox(tr("Show when a session starts"))
         self.ov_auto.setChecked(settings.overlay_autoshow)
         self.ov_auto.toggled.connect(self._set_autoshow)
 
         # overlay controls: their own full-width row in the column
-        ov_box = QGroupBox("Overlay")
+        ov_box = QGroupBox(tr("Overlay"))
         ov = QHBoxLayout(ov_box)
         ov.setContentsMargins(14, 12, 14, 14)
         ov.setSpacing(12)
@@ -462,7 +457,7 @@ class Dashboard(QWidget):
         self.log_btn.setFont(theme.mono(12))
         self.log_btn.setStyleSheet(_mono_css(12))   # see _mono_css: QSS wins
         self.log_btn.setToolTip(
-            "Session log: watcher messages, generated variants, launch results")
+            "训练日志：监测消息、自适应版本生成结果和游戏启动结果")
         self.log_btn.toggled.connect(self._toggle_log)
         log_row = QHBoxLayout()
         log_row.addWidget(self.log_btn)
@@ -617,7 +612,7 @@ class Dashboard(QWidget):
             self._stopping = True
             self.worker.stop()
             self.start_btn.setEnabled(False)
-            self.start_btn.setText("Stopping…")
+            self.start_btn.setText(tr("Stopping…"))
             self.play_btn.setEnabled(False)
             return
         name = self._picked_scenario()
@@ -649,7 +644,7 @@ class Dashboard(QWidget):
         self.worker = w
         self._watching = name
         w.start()
-        self.start_btn.setText("Stop")
+        self.start_btn.setText(tr("Stop"))
         self.scenario.setEnabled(False)
         self._render_rec(True)
         # The watcher's fatigue tracker is session-scoped and restarts here;
@@ -666,7 +661,7 @@ class Dashboard(QWidget):
         self._watching = ""
         self._stopping = False
         self.start_btn.setEnabled(True)
-        self.start_btn.setText("Start adapting")
+        self.start_btn.setText(tr("Start adapting"))
         self.scenario.setEnabled(True)
         self._render_install()          # re-enable Play per install status
         self._render_rec(False)
@@ -702,7 +697,7 @@ class Dashboard(QWidget):
         if on and not self.ov_toggle.isChecked():
             self.ov_toggle.setChecked(True)
         self.overlay.set_unlocked(on)
-        self.ov_unlock.setText("Lock" if on else "Unlock")
+        self.ov_unlock.setText(tr("Lock") if on else tr("Unlock"))
 
     def _set_autoshow(self, on: bool) -> None:
         self.s.overlay_autoshow = on

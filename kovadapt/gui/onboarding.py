@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import Settings
+from .i18n import tr
 
 # Every live HintBar, so one dismiss / re-enable reaches all tabs.
 _hint_bars: "weakref.WeakSet[HintBar]" = weakref.WeakSet()
@@ -38,7 +39,7 @@ class HintBar(QFrame):
         super().__init__(parent)
         self.s = settings
         self.setProperty("hint", True)
-        tag = QLabel("TIP")
+        tag = QLabel(tr("TIP"))
         tag.setStyleSheet("font-weight: 700; font-size: 11px;")
         tag.setProperty("dim", True)
         body = QLabel(text)
@@ -48,7 +49,7 @@ class HintBar(QFrame):
         close = QPushButton("×")
         close.setProperty("flat", True)
         close.setFixedWidth(24)
-        close.setToolTip("Hide hints everywhere (Help menu brings them back)")
+        close.setToolTip("隐藏所有提示；可以从帮助菜单重新显示")
         close.clicked.connect(self._dismiss_all)
 
         lay = QHBoxLayout(self)
@@ -82,49 +83,42 @@ def set_hints_visible(settings: Settings, visible: bool) -> None:
 # --------------------------------------------------------------------- guide
 _PAGES = [
     (
-        "Welcome to kovadapt",
-        "kovadapt makes KovaaK's adapt to <i>you</i>. After every run it:"
+        "欢迎使用 kovadapt",
+        "kovadapt 会让 KovaaK's 根据<i>你的表现</i>自动调整。每局结束后，它会："
         "<ol>"
-        "<li>reads the run's stats (and your raw mouse movement, if enabled),</li>"
-        "<li>updates a per-scenario model of your strengths and weaknesses,</li>"
-        "<li>rewrites a <b>[Adaptive]</b> copy of the scenario — resized targets, "
-        "spawns shifted toward your weak regions, movement tuned to your pace.</li>"
+        "<li>读取本局统计数据，以及启用后的原始鼠标输入；</li>"
+        "<li>更新该场景下你的强项与弱项模型；</li>"
+        "<li>重写场景的 <b>[Adaptive]</b> 副本，调整目标尺寸、弱区生成位置和移动节奏。</li>"
         "</ol>"
-        "The base scenario is never touched, and the game itself is never modified — "
-        "only its own scenario files.",
+        "原始场景不会被改动，游戏本体也不会被修改；程序只处理 KovaaK's 自己的场景文件。",
     ),
     (
-        "Your first session",
+        "第一次训练",
         "<ol>"
-        "<li>On the <b>Dashboard</b>, pick a scenario and press <b>Play adaptive "
-        "task</b> — kovadapt starts watching, queues the adaptive playlist, and "
-        "launches KovaaK's through Steam.</li>"
-        "<li>In the game, open <b>Playlists → kovadapt adaptive</b> and play.</li>"
-        "<li>Between runs the scenario silently gets harder, easier, or shifts "
-        "toward what you miss. Runs of the base scenario count too.</li>"
+        "<li>在<b>训练总览</b>中选择场景，然后点击<b>开始自适应训练</b>。"
+        "kovadapt 会开始记录、生成播放列表并通过 Steam 启动 KovaaK's。</li>"
+        "<li>在游戏中打开 <b>Playlists → kovadapt adaptive</b> 并开始训练。</li>"
+        "<li>每局之间，场景会自动变难、变简单或加强你经常失误的区域；"
+        "直接训练原始场景也会计入数据。</li>"
         "</ol>"
-        "The calibration bar fills as the model learns — adaptation works from run 1 "
-        "and sharpens over ~10 runs.",
+        "模型从第 1 局开始适配，通常训练约 10 局后，校准结果会更加可靠。",
     ),
     (
-        "Overlay & optimizer",
-        "<b>Overlay</b> — a small always-on-top card with your live session: last "
-        "run vs baseline, fatigue, difficulty, input health. Toggle it on the "
-        "Dashboard, drag it anywhere with <b>Unlock</b>, tune its opacity. The game "
-        "must be Borderless or Windowed for overlays to show."
+        "游戏内浮窗与性能优化",
+        "<b>游戏内浮窗</b>会显示本局与个人基线、疲劳、难度和输入状态。"
+        "可在训练总览中开启，通过<b>解锁位置</b>拖动并调整透明度。"
+        "游戏需要使用无边框或窗口模式才能显示浮窗。"
         "<br><br>"
-        "<b>Optimizer</b> — hardware-matched performance checkup with one-click "
-        "fixes, plus a watchdog that gives the game High priority and frees the "
-        "input-processing core on every launch (the free Process Lasso).",
+        "<b>性能优化</b>会根据硬件检查系统设置，并提供可选的一键修复；"
+        "后台监测器还可以在游戏启动时设置高优先级并释放输入处理核心。",
     ),
     (
-        "Your data",
-        "Everything lives locally in <code>~/.kovadapt</code> — profiles, mouse "
-        "traces, run reports, clips. Nothing is uploaded anywhere."
+        "你的本地数据",
+        "训练档案、鼠标轨迹、报告和录像片段全部保存在 "
+        "<code>~/.kovadapt</code>，不会上传到网络。"
         "<br><br>"
-        "Every tab has short <b>TIP</b> bars while you learn the app; the × on any "
-        "of them tucks them all away, and <b>Help → Show hints</b> brings them "
-        "back. This guide stays available under <b>Help → Startup guide</b>.",
+        "各页面顶部的<b>提示</b>可以帮助你熟悉软件。点击任意提示上的 × 会"
+        "隐藏全部提示；之后可从帮助菜单重新显示。本指南也会一直保留在帮助菜单中。",
     ),
 ]
 
@@ -133,7 +127,7 @@ class WelcomeDialog(QDialog):
     def __init__(self, settings: Settings, parent=None) -> None:
         super().__init__(parent)
         self.s = settings
-        self.setWindowTitle("kovadapt — startup guide")
+        self.setWindowTitle("kovadapt — 启动指南")
         self.setModal(True)
         self.resize(520, 400)
 
@@ -154,11 +148,11 @@ class WelcomeDialog(QDialog):
 
         self.progress = QLabel("")
         self.progress.setProperty("dim", True)
-        self.again = QCheckBox("Show this guide on the next start")
+        self.again = QCheckBox(tr("Show this guide on the next start"))
         self.again.setChecked(False)     # finishing the guide dismisses it
-        self.back_btn = QPushButton("Back")
+        self.back_btn = QPushButton(tr("Back"))
         self.back_btn.clicked.connect(lambda: self._go(-1))
-        self.next_btn = QPushButton("Next")
+        self.next_btn = QPushButton(tr("Next"))
         self.next_btn.setProperty("accent", True)
         self.next_btn.clicked.connect(self._next)
 
@@ -189,7 +183,7 @@ class WelcomeDialog(QDialog):
         i, n = self.pages.currentIndex(), self.pages.count()
         self.progress.setText(f"{i + 1} / {n}")
         self.back_btn.setEnabled(i > 0)
-        self.next_btn.setText("Get started" if i == n - 1 else "Next")
+        self.next_btn.setText(tr("Get started") if i == n - 1 else tr("Next"))
 
     def done(self, result: int) -> None:
         # Only finishing the guide dismisses it; closing it mid-read keeps

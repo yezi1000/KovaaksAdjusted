@@ -11,6 +11,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from ..config import Settings
+from .i18n import tr
 
 
 class OptimizerView(QWidget):
@@ -19,21 +20,18 @@ class OptimizerView(QWidget):
         self.s = settings
         self.window = None   # created lazily; import stays off the startup path
 
-        head = QLabel("Performance optimizer")
+        head = QLabel(tr("Performance optimizer"))
         head.setProperty("headline", True)
         blurb = QLabel(
-            "Hardware detection, a one-click system checkup with per-item fixes, "
-            "a watchdog that applies High priority and frees the input-processing "
-            "core on every game launch (what Process Lasso charges for; CPU 0+1 "
-            "with hyperthreading, CPU 0 without), and launch options + settings "
-            "matched to your hardware.\n\n"
-            "Everything is opt-in and minimally invasive: fixes are per-user and "
-            "reversible, nothing runs until you click it, and the only process "
-            "kovadapt ever touches is the game's."
+            "检测硬件与系统设置，按项目提供可选的一键修复；后台监测器可在每次"
+            "启动游戏时设置高优先级并释放输入处理核心，同时给出适合当前硬件的"
+            "启动参数和设置建议。\n\n"
+            "所有优化均需手动启用，可撤销且只对当前用户生效；kovadapt 只会处理"
+            "游戏进程，不会自动修改其他程序。"
         )
         blurb.setWordWrap(True)
         blurb.setProperty("dim", True)
-        open_btn = QPushButton("Open optimizer window")
+        open_btn = QPushButton(tr("Open optimizer window"))
         open_btn.setProperty("accent", True)
         open_btn.clicked.connect(self.open_window)
         btn_row = QHBoxLayout()          # natural-width CTA, not a 950px slab

@@ -44,6 +44,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from ..config import Settings
 from . import theme
+from .i18n import tr
 
 _CARD_WIDTH = 272
 _SPARK_RUNS = 40
@@ -449,8 +450,8 @@ class OverlayWindow(QWidget):
         self.title = QLabel("kovadapt")
         self.scenario = QLabel("")
         self.scenario.setWordWrap(True)
-        self.status = QLabel("not watching")
-        self.hint = QLabel("drag to move · lock from the Dashboard")
+        self.status = QLabel(tr("not watching"))
+        self.hint = QLabel("拖动以调整位置 · 完成后在训练总览中锁定")
         self.hint.hide()
 
         self.deck = _StatDeck()
@@ -590,12 +591,11 @@ class OverlayWindow(QWidget):
 
     def _render_status(self) -> None:
         if not self._live:
-            self.status.setText("not watching")
+            self.status.setText(tr("not watching"))
         elif self._session_runs:
-            self.status.setText(f"watching · {self._session_runs} run"
-                                f"{'' if self._session_runs == 1 else 's'}")
+            self.status.setText(f"正在分析 · {self._session_runs} 局")
         else:
-            self.status.setText("watching")
+            self.status.setText(tr("watching"))
 
     def _reference(self) -> tuple[float | None, str]:
         """(accuracy reference, what it is). The profile EWMA when we have

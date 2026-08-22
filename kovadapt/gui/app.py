@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
+from PySide6.QtGui import QDesktopServices, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -33,15 +33,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from PySide6.QtGui import QPainter
-
 from ..config import Settings
 from . import logo, transition, viz
-from .backdrop import Backdrop
 from .analysis_view import AnalysisView
+from .backdrop import Backdrop
 from .browser import ScenarioBrowser
 from .config_view import ConfigView
 from .dashboard import Dashboard
+from .i18n import tr
 from .onboarding import WelcomeDialog, set_hints_visible
 from .optimizer_view import OptimizerView
 from .shell import NavBar, PageSpace
@@ -115,7 +114,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.s = settings
         self.themes = themes
-        self.setWindowTitle("kovadapt — adaptive KovaaK's")
+        self.setWindowTitle("kovadapt — KovaaK's 自适应训练")
         self.resize(1360, 900)
 
         self.dashboard = Dashboard(settings)
@@ -127,19 +126,19 @@ class MainWindow(QMainWindow):
         self.changes = ChangesView(settings) if ChangesView is not None else None
         # one continuous scroll of transparent sections over the backdrop
         self.space = PageSpace()
-        sections = [("Dashboard", self.dashboard),
-                    ("Scenarios", self.browser),
-                    ("Analysis", self.analysis)]
+        sections = [(tr("Dashboard"), self.dashboard),
+                    (tr("Scenarios"), self.browser),
+                    (tr("Analysis"), self.analysis)]
         # "What changed" reads PER TASK, where Analysis reads per RUN, so it is
         # its own section rather than another block on an already-tall page.
         # It cannot be called "Adaptability" — that name is taken by the
         # settings page below it.
         if self.changes is not None:
-            sections.append(("What changed", self.changes))
-        sections += [("Adaptability", self.config),
-                     ("Optimizer", self.optimizer)]
+            sections.append((tr("What changed"), self.changes))
+        sections += [(tr("Adaptability"), self.config),
+                     (tr("Optimizer"), self.optimizer)]
         if self.ml_page is not None:
-            sections.append(("How it learns", self.ml_page))   # always last
+            sections.append((tr("How it learns"), self.ml_page))   # always last
         for name, page in sections:
             self.space.add_section(name, page)
         self.nav = NavBar(self.space, corner=self._corner())
@@ -186,14 +185,14 @@ class MainWindow(QMainWindow):
 
         sb = self.statusBar()
         sb.showMessage(
-            f"KovaaK's: {settings.kovaaks_root or 'NOT FOUND — set KOVAAKS_ROOT'}"
+            f"KovaaK's：{settings.kovaaks_root or '未找到 — 请设置 KOVAAKS_ROOT'}"
         )
 
     # ----------------------------------------------------------- corner bar
     def _corner(self) -> QWidget:
         self.theme_pick = _ThemeCombo()
-        for label, mode in (("Auto theme", "auto"), ("Light", "light"),
-                            ("Dark", "dark"), ("Midnight", "midnight"),
+        for label, mode in ((tr("Auto theme"), "auto"), (tr("Light"), "light"),
+                            (tr("Dark"), "dark"), (tr("Midnight"), "midnight"),
                             ("RGB", "rgb")):
             self.theme_pick.addItem(label, mode)
         self.theme_pick.setToolTip(
@@ -207,7 +206,7 @@ class MainWindow(QMainWindow):
         self.accent_pick = QComboBox()
         for key in ACCENTS:
             self.accent_pick.addItem(key.capitalize(), key)
-        self.accent_pick.setToolTip("Accent color")
+        self.accent_pick.setToolTip(tr("Accent color"))
         idx = list(ACCENTS).index(self.s.accent) if self.s.accent in ACCENTS else 0
         self.accent_pick.setCurrentIndex(idx)
         self.accent_pick.currentIndexChanged.connect(self._pick_accent)
@@ -223,10 +222,10 @@ class MainWindow(QMainWindow):
         # "Indigo". Overriding the horizontal padding restores the glyph at
         # this width; keep the two in step if either changes.
         help_btn.setStyleSheet("padding: 7px 0px;")
-        help_btn.setToolTip("Guide, hints, and your data")
+        help_btn.setToolTip("使用指南、界面提示和本地数据")
         menu = QMenu(help_btn)
-        menu.addAction("Startup guide…", self._show_guide)
-        self._hints_action = menu.addAction("Show hints")
+        menu.addAction(tr("Startup guide…"), self._show_guide)
+        self._hints_action = menu.addAction(tr("Show hints"))
         self._hints_action.setCheckable(True)
         self._hints_action.setChecked(self.s.show_hints)
         self._hints_action.toggled.connect(
@@ -235,7 +234,7 @@ class MainWindow(QMainWindow):
         # after that actually re-enables them instead of re-hiding.
         menu.aboutToShow.connect(self._sync_hints_action)
         menu.addSeparator()
-        menu.addAction("Open data folder", self._open_data_dir)
+        menu.addAction(tr("Open data folder"), self._open_data_dir)
         help_btn.setMenu(menu)
 
         w = QWidget()

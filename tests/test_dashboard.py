@@ -293,10 +293,12 @@ def test_trend_stays_empty_below_two_runs(qapp, settings):
 
 # ---------------------------------------------------------------- the log
 def test_log_is_collapsed_capped_and_takes_no_stretch(qapp, settings):
+    from kovadapt.gui.dashboard import LOG_LABEL
+
     dash = _dashboard(settings, "Xi")
     lay = dash.layout()
     assert dash.log.isHidden()
-    assert dash.log_btn.text() == "[ log ]"
+    assert dash.log_btn.text() == LOG_LABEL
     assert not dash.log_btn.isChecked()
     assert dash.log.maximumHeight() <= 150
     # NO panel may carry the column's vertical stretch — every one of them has
@@ -313,15 +315,17 @@ def test_log_is_collapsed_capped_and_takes_no_stretch(qapp, settings):
 
 
 def test_log_toggle_reveals_and_clears_the_unread_mark(qapp, settings):
+    from kovadapt.gui.dashboard import LOG_LABEL, LOG_UNREAD
+
     dash = _dashboard(settings, "Omicron")
     dash.append_log("scenario file not found: nope.sce")
-    assert dash.log_btn.text() == "[ log • ]"     # collapsed failures still show
+    assert dash.log_btn.text() == LOG_UNREAD     # collapsed failures still show
     dash.log_btn.setChecked(True)
     assert not dash.log.isHidden()
-    assert dash.log_btn.text() == "[ log ]"
+    assert dash.log_btn.text() == LOG_LABEL
     assert "nope.sce" in dash.log.toPlainText()
     dash.append_log("stopped")                    # open: no mark
-    assert dash.log_btn.text() == "[ log ]"
+    assert dash.log_btn.text() == LOG_LABEL
     dash.log_btn.setChecked(False)
     assert dash.log.isHidden()
     dash.shutdown()
@@ -330,13 +334,15 @@ def test_log_toggle_reveals_and_clears_the_unread_mark(qapp, settings):
 
 # ------------------------------------------------------------ play + theme
 def test_play_lockup_and_overlay_row_survive(qapp, settings):
+    from kovadapt.gui.i18n import tr
+
     dash = _dashboard(settings, "Pi")
     for w in (dash.scenario, dash.refresh_btn, dash.start_btn, dash.play_btn,
               dash.launch_btn, dash.install_lbl, dash.rec_lbl,
               dash.ov_toggle, dash.ov_unlock, dash.ov_opacity, dash.ov_auto):
         assert w is not None
     assert dash.scenario.currentText() == "Pi"
-    assert dash.start_btn.text() == "Start adapting"
+    assert dash.start_btn.text() == tr("Start adapting")
     assert dash.worker is None                    # nothing launched by building
     dash.shutdown()
     dash.deleteLater()
