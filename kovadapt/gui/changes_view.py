@@ -97,6 +97,7 @@ from ..scenario.generator import (
 )
 from ..scenario.sce import SceFile
 from . import motion, theme
+from .i18n import archetype_name, tr
 from .onboarding import HintBar
 
 # Glyph ramps, same convention as gui/viz.py: dense at the anchor, light at
@@ -1597,6 +1598,110 @@ def build_knobs(profile: PlayerProfile, settings: Settings, facts: SceFacts,
     return knobs
 
 
+def localized_knobs(knobs: list[Knob], profile: PlayerProfile,
+                    facts: SceFacts) -> list[Knob]:
+    """Create concise Chinese display copies of the five controller readings."""
+    names = {
+        "target_scale": "目标大小",
+        "target_speed": "目标速度",
+        "spawn_focus": "重点区域生成占比",
+        "dodge_bias": "闪避方向偏移",
+        "movement": "移动强度 / 节奏",
+    }
+    tips = {
+        "target_scale": "准确率低于训练区间时放大目标，高于区间时缩小目标；区间内保持不变。",
+        "target_speed": "根据基础场景是否自带速度，使用绝对速度或相对作者速度的倍率。",
+        "spawn_focus": "从各墙面区域的弱项分布中抽样重点区域，并增加该区域的目标生成占比。",
+        "dodge_bias": "根据左右甩枪代价的长期偏差调整左右移动时间，让较弱一侧得到更多训练。",
+        "movement": "每局推进一次均值回归随机过程，并结合个人击杀节奏调节目标移动强度。",
+    }
+    flags = {
+        "no evidence": "暂无证据", "no runs yet": "暂无训练记录",
+        "cold start": "冷启动", "exploration": "探索中",
+        "gated off": "未达到阈值", "mixed paths": "混合速度路径",
+        "unreadable": "无法读取", "no effect": "该场景不适用",
+    }
+    out: list[Knob] = []
+    for knob in knobs:
+        if knob.key == "target_scale":
+            evidence = (f"依据：{profile.run_count} 局训练记录；当前大小倍率为 "
+                        f"{knob.text(knob.now)}，基线为 {knob.text(knob.baseline)}。")
+        elif knob.key == "target_speed":
+            source = "已写入的 [Adaptive] 场景文件" if facts.have_variant else "当前模型计划"
+            evidence = (f"依据：{source}；当前值为 {knob.text(knob.now)}{knob.unit}，"
+                        f"基线为 {knob.text(knob.baseline)}。")
+        elif knob.key == "spawn_focus":
+            focus = profile.last_focus or "尚未选择"
+            evidence = (f"依据：当前重点区域 {focus}；生成占比从 "
+                        f"{knob.text(knob.baseline)} 调整到 {knob.text(knob.now)}。")
+        elif knob.key == "dodge_bias":
+            evidence = (f"依据：{profile.bias_obs} 次有效方向偏差观测，偏差 EWMA "
+                        f"为 {profile.ewma_bias:+.2f}；当前写入偏移 {knob.text(knob.now)}。")
+        else:
+            evidence = (f"依据：OU 状态 {profile.ou_state:+.2f}，累计 {profile.run_count} 次更新；"
+                        f"移动强度从 {knob.text(knob.baseline)} 调整到 {knob.text(knob.now)}。")
+
+        note_parts: list[str] = []
+        if not knob.measured:
+            note_parts.append(flags.get(knob.flag, "当前证据不足"))
+        if knob.pending:
+            if not facts.have_base and facts.variant_on_disk:
+                note_parts.append(
+                    "无法验证：磁盘上确实存在 [Adaptive] 文件，但缺少基础场景，无法进行前后对比")
+            elif facts.variant_on_disk:
+                note_parts.append("磁盘上的 [Adaptive] 文件无法读取，文件内容未知")
+            else:
+                note_parts.append("尚未写入游戏中的 [Adaptive] 场景文件")
+        if knob.at_bound and knob.measured:
+            note_parts.append("当前值已到控制范围边界")
+        if not knob.rail:
+            note_parts.append("基础场景无法提供可比较的单一数值")
+        delta = knob.delta_text
+        delta = delta.replace("toward left", "偏向左侧").replace("toward right", "偏向右侧")
+        out.append(replace(
+            knob, name=names.get(knob.key, knob.name), evidence=evidence,
+            note="；".join(note_parts), tip=tips.get(knob.key, ""),
+            flag=flags.get(knob.flag, knob.flag), delta_text=delta))
+    return out
+
+
+def _headline_unwritten_zh(facts: SceFacts | None) -> str:
+    """Chinese display copy of the three distinct unwritten-file states."""
+    if facts is None or facts.have_variant:
+        return ""
+    if not facts.have_base:
+        text = "；无法与游戏文件核对：Scenarios 文件夹中缺少基础 .sce 文件"
+        if facts.variant_on_disk:
+            text += "，磁盘上的 [Adaptive] 文件也因此没有可比较的基准"
+        return text
+    if facts.variant_on_disk:
+        return "；磁盘上的 [Adaptive] 文件无法读取，尚未按游戏实际文件验证"
+    return "；尚未写入 [Adaptive] 场景文件，因此游戏内还没有应用这些调整"
+
+
+def takeaway_zh(knobs: list[Knob], profile: PlayerProfile | None,
+                facts: SceFacts | None = None) -> str:
+    """Chinese headline over localized knob copies."""
+    if profile is None or not knobs:
+        return "选择一个场景，查看 kovadapt 对它做过哪些调整"
+    unwritten = _headline_unwritten_zh(facts)
+    if profile.run_count == 0:
+        return (f"{profile.scenario} 已创建训练档案，但还没有完成记录；"
+                "下方数值均为冷启动默认值，尚不是学习结果" + unwritten)
+    moved = [k for k in knobs if k.measured and k.moved]
+    written = facts is None or facts.have_variant
+    if not moved:
+        return (f"完成 {profile.run_count} 局后，所有有证据的指标仍保持在基线"
+                + unwritten)
+    biggest = max(
+        moved, key=lambda k: abs(k.now - k.baseline) / max(k.hi - k.lo, 1e-9))
+    state = "已写入场景" if written else "仍在模型中，尚未写入场景"
+    return (f"完成 {profile.run_count} 局后，{len(moved)}/{len(knobs)} 个指标已有依据地发生变化"
+            f"（{state}）；变化最大的是{biggest.name}："
+            f"{biggest.text(biggest.baseline)} → {biggest.text(biggest.now)}"
+            + unwritten)
+
+
 def _headline_unwritten(facts: SceFacts | None) -> str:
     """The headline's own version of _pending_note — the same three absences, and
     the same rule: only `variant_on_disk` may back a claim about the disk."""
@@ -1921,7 +2026,7 @@ class KnobLadder(_Art):
         width = float(self.width())
         if not self._knobs:
             _empty_band(p, pal, QRectF(0, 8, width, self.height() - 8),
-                        "no scenario selected")
+                        "尚未选择场景")
             return
 
         geo = self._layout()
@@ -1947,20 +2052,21 @@ class KnobLadder(_Art):
         p.setFont(name_f)
         p.setPen(QColor(pal.fg_dim))
         p.drawText(QRectF(14, 4, x_read - 20, line_h),
-                   Qt.AlignLeft | Qt.AlignVCenter, "CRITERION")
+                   Qt.AlignLeft | Qt.AlignVCenter, "指标")
         p.drawText(QRectF(x_read, 4, base_w + arrow_w + now_w + 12, line_h),
-                   Qt.AlignLeft | Qt.AlignVCenter, "BASELINE -> NOW")
+                   Qt.AlignLeft | Qt.AlignVCenter, "基线 -> 当前")
         # The delta column names itself, and names itself PLANNED while nothing
         # has been written: every delta below it is then a model value the game
         # has never seen.
         p.drawText(QRectF(x_delta, 4, geo.delta_w, line_h),
-                   Qt.AlignLeft | Qt.AlignVCenter, self.delta_header())
+                   Qt.AlignLeft | Qt.AlignVCenter,
+                   "计划" if self.delta_header() == "PLANNED" else "变化")
         if has_rail:
             p.drawText(QRectF(x_rail, 4, x_end - x_rail, line_h),
-                       Qt.AlignLeft | Qt.AlignVCenter, "CONTROLLER RANGE")
+                       Qt.AlignLeft | Qt.AlignVCenter, "控制范围")
         else:
             p.drawText(QRectF(x_range, 4, range_w, line_h),
-                       Qt.AlignLeft | Qt.AlignVCenter, "RANGE")
+                       Qt.AlignLeft | Qt.AlignVCenter, "范围")
 
         for row, knob in enumerate(self._knobs):
             y = self.HEAD_H + row * self.ROW_H
@@ -2210,11 +2316,18 @@ class SpawnGrid(_Art):
         width, height = float(self.width()), float(self.height())
         sm = self._map
         untouched = sm is not None and sm.untouched
-        top = _title_band(p, pal, self.title_text(), width)
+        title = {
+            "spawn layout per wall region - unreadable": "各墙面区域生成布局 — 无法读取",
+            "spawn layout per wall region - the author's own, left untouched":
+                "各墙面区域生成布局 — 保持作者原始设置",
+            "spawn density per wall region - base vs variant":
+                "各墙面区域生成密度 — 基础场景与变体对比",
+        }.get(self.title_text(), self.title_text())
+        top = _title_band(p, pal, title, width)
         geom = self._geom()
         if geom is None:
             reason = (sm.reason if sm is not None and sm.reason
-                      else "no spawn data for this scenario")
+                      else "该场景没有可用的目标生成数据")
             _empty_band(p, pal, QRectF(0, top, width, height - top), reason)
             return
         x0, y0, cw, ch, gap, rows, cols = geom
@@ -2360,7 +2473,7 @@ class FileLedger(_Art):
         top = self.TITLE_H          # the header band is drawn per column below
         if not self._rows:
             _empty_band(p, pal, QRectF(0, top, width, height - top),
-                        self._reason or "no scenario file to compare")
+                        self._reason or "没有可比较的场景文件")
             return
 
         key_f = theme.mono(12)
@@ -2387,13 +2500,13 @@ class FileLedger(_Art):
         p.setFont(key_f)
         p.setPen(QColor(pal.fg_dim))
         p.drawText(QRectF(x_key, 4, key_w, line_h),
-                   Qt.AlignLeft | Qt.AlignVCenter, "KEY")
+                   Qt.AlignLeft | Qt.AlignVCenter, "配置项")
         p.drawText(QRectF(x_base, 4, num_w, line_h),
-                   Qt.AlignRight | Qt.AlignVCenter, "BASE")
+                   Qt.AlignRight | Qt.AlignVCenter, "基础")
         p.drawText(QRectF(x_adap, 4, num_w, line_h),
-                   Qt.AlignRight | Qt.AlignVCenter, "VARIANT")
+                   Qt.AlignRight | Qt.AlignVCenter, "变体")
         p.drawText(QRectF(x_delta, 4, max(width - x_delta - 10.0, 40.0), line_h),
-                   Qt.AlignLeft | Qt.AlignVCenter, "CHANGE")
+                   Qt.AlignLeft | Qt.AlignVCenter, "变化")
 
         for i, row in enumerate(self._rows):
             y = top + i * self.ROW_H
@@ -2458,6 +2571,19 @@ _LEDGER_CAPTION = (
     "to the BASE .sce and never to the previous variant, so these are literally "
     "the before and the after — not a reconstruction.")
 
+_LADDER_CAPTION_ZH = (
+    "每条轨道覆盖对应控制器的真实范围。<b>|</b> 表示基线，<b>@</b> 表示当前值，"
+    "<b>0</b> 表示两者重合；两点之间的字符表示变化幅度。目标速度和重点区域占比会优先"
+    "从已写入的 <code>[Adaptive] .sce</code> 中读取；没有变体时显示的是计划值。"
+    "暗色表示冷启动且尚无训练证据，琥珀色表示已到控制边界，破折号表示文件不足以支持判断。")
+_GRID_CAPTION_ZH = (
+    "每个字符块对应一个墙面区域；字符越密，落在该区域的目标生成点越多。数量按“基础场景＞"
+    "自适应场景”显示，强调色表示变体增加了该区域的训练量；描边区域在基础布局中没有可用"
+    "生成点。第 0 行是墙面底部，可悬停查看详情。")
+_LEDGER_CAPTION_ZH = (
+    "数据直接读取自基础场景和 [Adaptive] 场景两个文件。生成器始终从基础 .sce 重新应用计划，"
+    "不会在旧变体上叠加，因此这里显示的是真实前后对比。")
+
 
 def _clear_layout(layout) -> None:
     while layout.count():
@@ -2491,15 +2617,15 @@ class ChangesView(QWidget):
 
         self.picker = QComboBox()
         self.picker.setMinimumWidth(320)
-        self.picker.setToolTip("Scenarios kovadapt has a player model for")
+        self.picker.setToolTip("已建立 kovadapt 玩家模型的场景")
         self.picker.currentIndexChanged.connect(self._picked)
-        self.reload_btn = QPushButton("Refresh")
-        self.reload_btn.setToolTip("Rescan profiles, run reports and scenario files")
+        self.reload_btn = QPushButton(tr("Refresh"))
+        self.reload_btn.setToolTip("重新扫描训练档案、复盘报告和场景文件")
         self.reload_btn.clicked.connect(self.refresh)
 
         row = QHBoxLayout()
         row.setSpacing(10)
-        label = QLabel("Task")
+        label = QLabel("场景")
         label.setProperty("dim", True)
         row.addWidget(label)
         row.addWidget(self.picker)
@@ -2522,30 +2648,30 @@ class ChangesView(QWidget):
         self.ev_box.setSpacing(6)
         self.ev_box.setContentsMargins(0, 4, 0, 0)
 
-        moved_box = QGroupBox("WHAT MOVED, AND ON WHAT EVIDENCE")
+        moved_box = QGroupBox("调整了什么，以及依据是什么")
         moved_lay = QVBoxLayout(moved_box)
         moved_lay.setSpacing(8)
         moved_lay.addWidget(self.ladder)
-        moved_lay.addWidget(_caption(_LADDER_CAPTION))
+        moved_lay.addWidget(_caption(_LADDER_CAPTION_ZH))
         moved_lay.addLayout(self.ev_box)
 
-        spawn_box = QGroupBox("WHERE THE SPAWNS WENT")
+        spawn_box = QGroupBox("目标生成点分布")
         spawn_lay = QVBoxLayout(spawn_box)
         spawn_lay.setSpacing(8)
         spawn_lay.addWidget(self.grid)
         self.spawn_note = QLabel("")
         self.spawn_note.setWordWrap(True)
         spawn_lay.addWidget(self.spawn_note)
-        spawn_lay.addWidget(_caption(_GRID_CAPTION))
+        spawn_lay.addWidget(_caption(_GRID_CAPTION_ZH))
 
-        file_box = QGroupBox("IN THE SCENARIO FILE")
+        file_box = QGroupBox("场景文件中的实际改动")
         file_lay = QVBoxLayout(file_box)
         file_lay.setSpacing(8)
         file_lay.addWidget(self.ledger)
         self.provenance = QLabel("")
         self.provenance.setWordWrap(True)
         file_lay.addWidget(self.provenance)
-        file_lay.addWidget(_caption(_LEDGER_CAPTION))
+        file_lay.addWidget(_caption(_LEDGER_CAPTION_ZH))
 
         lay = QVBoxLayout(self)
         # ZERO, explicitly. Every section view inherited Qt's ~9px default
@@ -2556,10 +2682,9 @@ class ChangesView(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(12)
         lay.addWidget(HintBar(settings, (
-            "Every number on this page carries the runs behind it. A criterion "
-            "with no evidence yet says so instead of implying a change — and "
-            "the file section is read out of the two <code>.sce</code> files on "
-            "disk, so it is a measured before/after rather than a guess.")))
+            "本页每个数值都会说明背后的训练证据。证据不足的指标会明确标注，不会假装已经学到变化；"
+            "文件区域直接读取磁盘上的基础与 <code>[Adaptive] .sce</code>，因此展示的是实际前后"
+            "对比，而不是推测。")))
         lay.addLayout(row)
         lay.addWidget(self.headline)
         lay.addWidget(self.subhead)
@@ -2596,11 +2721,11 @@ class ChangesView(QWidget):
         self.picker.clear()
         if self._entries:
             for entry in self._entries:
-                runs = f"{entry.runs} run{'s' if entry.runs != 1 else ''}"
+                runs = f"{entry.runs} 局"
                 self.picker.addItem(f"{entry.base}  ·  {runs}", entry.base)
             self.picker.setEnabled(True)
         else:
-            self.picker.addItem("no player models yet", "")
+            self.picker.addItem("尚无玩家模型", "")
             self.picker.setEnabled(False)
         self._loading = False
         target = keep if any(e.base == keep for e in self._entries) else (
@@ -2647,7 +2772,7 @@ class ChangesView(QWidget):
         self._knobs = []
         self.ladder.set_knobs([])
         self.grid.set_map(None)
-        self.ledger.set_rows((), "no scenario selected")
+        self.ledger.set_rows((), "尚未选择场景")
         self._render_text()
 
     def _load(self, base: str) -> None:
@@ -2661,7 +2786,7 @@ class ChangesView(QWidget):
 
         spawns = facts.spawns
         if spawns is None:
-            err = facts.error or "no scenario file to read"
+            err = facts.error or "没有可读取的场景文件"
             spawns = SpawnMap(cols=self.s.region_cols, rows=self.s.region_rows,
                               focus=profile.last_focus,
                               reason=err, error=err)
@@ -2674,17 +2799,18 @@ class ChangesView(QWidget):
         self._profile = profile
         self._facts = facts
         self._ev = ev
-        self._knobs = build_knobs(profile, self.s, facts, ev)
+        self._knobs = localized_knobs(build_knobs(profile, self.s, facts, ev),
+                                      profile, facts)
 
         self.ladder.set_knobs(self._knobs)
         self.grid.set_map(spawns)
         # Short panel reason; the detail belongs to the provenance line below
         # it, which has room for a sentence and a tooltip.
         self.ledger.set_rows(facts.rows,
-                             "no base scenario file to read" if not facts.have_base
-                             else "no [Adaptive] variant on disk yet"
+                             "无法读取基础场景文件" if not facts.have_base
+                             else "磁盘上尚无 [Adaptive] 变体"
                              if not facts.have_variant
-                             else "no editable target sections in this scenario")
+                             else "该场景没有可编辑的目标配置段")
         self._render_text()
         self._begin_reveal()
 
@@ -2697,7 +2823,7 @@ class ChangesView(QWidget):
         """
         pal = theme.current()
         profile, facts = self._profile, self._facts
-        self.headline.setText(takeaway(self._knobs, profile, facts))
+        self.headline.setText(takeaway_zh(self._knobs, profile, facts))
         self.subhead.setText(self._subhead())
         _clear_layout(self.ev_box)
         for knob in self._knobs:
@@ -2710,27 +2836,27 @@ class ChangesView(QWidget):
     def _subhead(self) -> str:
         profile, facts = self._profile, self._facts
         if profile is None:
-            return ("No scenario has a player model yet. kovadapt writes one on "
-                    "your first completed run, and there is nothing to show "
-                    "before then.")
+            return ("目前还没有场景建立玩家模型。完成第一局后 kovadapt 才会创建档案，"
+                    "在此之前没有可显示的调整记录。")
         cells = max(self.s.region_cols * self.s.region_rows, 1)
         ready = profile.readiness(cells)
-        arch = profile.archetype or "not stamped yet"
-        bits = [f"archetype {arch}", f"{profile.run_count} runs",
-                f"calibration {ready['score']:.0%} ({ready['stage']})"]
+        arch = archetype_name(profile.archetype) if profile.archetype else "尚未识别"
+        stages = {"cold start": "冷启动", "learning": "学习中",
+                  "calibrating": "校准中", "dialed in": "已就绪"}
+        bits = [f"训练类型：{arch}", f"{profile.run_count} 局",
+                f"校准度 {ready['score']:.0%}（{stages.get(ready['stage'], ready['stage'])}）"]
         if profile.last_run_ts:
-            bits.append("last run " + profile.last_run_ts.replace("T", " ")[:16])
+            bits.append("上次训练 " + profile.last_run_ts.replace("T", " ")[:16])
         if self._ev.files:
-            bits.append(f"{self._ev.files} run reports read from "
-                        + " + ".join(self._ev.dirs))
+            bits.append(f"已读取 {self._ev.files} 份复盘报告（"
+                        + " + ".join(self._ev.dirs) + "）")
         else:
-            bits.append("no run reports on disk — telemetry evidence unavailable")
+            bits.append("磁盘上没有复盘报告，暂时无法使用遥测证据")
         out = " · ".join(bits)
         if not profile.archetype:
-            out += ("  —  the archetype is stamped on the first run, so the bands "
-                    "and clamps below are the clicking defaults")
+            out += "  —  第一局后才会识别训练类型；当前区间和范围使用点击类默认值"
         if not facts.have_base and facts.error:
-            out += f"  —  {facts.error}"
+            out += "  —  无法读取基础场景文件"
         return out
 
     def _spawn_text(self, pal) -> str:
@@ -2739,28 +2865,32 @@ class ChangesView(QWidget):
             # The panel's own empty band already carries the reason; repeating
             # it verbatim one line lower read as a stutter.
             return ""
-        parts = [f"{spawns.total_base} target spawns in the base layout across "
-                 f"{len(spawns.base)} of {spawns.cells} regions"]
+        parts = [f"基础布局共有 {spawns.total_base} 个目标生成点，分布在 "
+                 f"{spawns.cells} 个区域中的 {len(spawns.base)} 个"]
         if spawns.adaptive:
-            parts.append(f"{spawns.total_adaptive} in the variant")
+            parts.append(f"自适应变体中共有 {spawns.total_adaptive} 个")
         if spawns.focus:
             where = _region_words(spawns.focus, self.s)
+            where = (where.replace("upper", "上方").replace("lower", "下方")
+                     .replace("middle", "中部").replace("left", "左侧")
+                     .replace("right", "右侧").replace("center", "中央"))
             # A bandit pick the generator could not act on is not a focus the
             # scenario has; say so on the same line rather than one line later.
-            parts.append(f"focus {spawns.focus} ({where})"
-                         + (" — not applied" if spawns.untouched else ""))
+            parts.append(f"重点区域 {spawns.focus}（{where}）"
+                         + (" — 当前场景无法应用" if spawns.untouched else ""))
         text = " · ".join(parts)
         if spawns.reason:
-            text += (f"<br><span style='color:{pal.warn}'>{spawns.reason}</span>")
+            text += (f"<br><span style='color:{pal.warn}'>当前布局保持作者原样，"
+                     "生成器没有应用区域加权。</span>")
         elif not spawns.adaptive:
             # Why there is nothing measured to show, from the same three states
             # the ladder's own clause uses: an unreadable [Adaptive] file is not
             # an absent one, and this line claimed it was.
-            why = ("the [Adaptive] file on disk could not be read"
+            why = ("磁盘上的 [Adaptive] 文件无法读取"
                    if self._facts.variant_on_disk else
-                   "no variant has been written yet")
-            text += (f"<br><span style='color:{pal.fg_dim}'>densities are the "
-                     f"weights the next generation would ask for — {why}</span>")
+                   "尚未写入自适应变体")
+            text += (f"<br><span style='color:{pal.fg_dim}'>当前密度表示下一次生成计划中的权重"
+                     f" — {why}</span>")
         return text
 
     def _provenance_text(self, pal) -> str:
@@ -2771,47 +2901,44 @@ class ChangesView(QWidget):
             # An [Adaptive] file that IS on disk gets said out loud: the page used
             # to report only the missing base and then claim, five knobs and one
             # headline over, that nothing had ever been written.
-            return (f"<span style='color:{pal.fg_dim}'>"
-                    f"{_esc(facts.error) or 'no scenario file found'} — kovadapt "
-                    "can still show the model, but there is no file to compare "
-                    "against"
-                    + (f"; <b>{name}</b> is on disk and cannot be read without its "
-                       "base." if facts.variant_on_disk else ".")
-                    + "</span>")
+            return (f"<span style='color:{pal.fg_dim}'>找不到可读取的基础场景文件；"
+                    "kovadapt 仍可显示模型，但无法进行文件前后对比"
+                    + (f"；<b>{name}</b> 已存在，但缺少基础文件时无法验证。"
+                       if facts.variant_on_disk else "。") + "</span>")
         # The verbatim header lives in the tooltip, not on the page: every number
         # printed on the page has to be one that applied here, and the raw string
         # carries a static-wall ramp figure even when the multiplier path ran.
         tip = str(facts.variant_path or "")
         if facts.description:
-            tip += "\n\nDescription header, verbatim:\n" + facts.description
+            tip += "\n\nDescription 原始记录：\n" + facts.description
         self.provenance.setToolTip(tip)
         if not facts.have_variant:
             if facts.variant_on_disk:
-                return (f"<span style='color:{pal.warn}'><b>{name}</b> is on disk "
-                        "but could not be read, so the column above has nothing to "
-                        "compare against and nothing here is verified against the "
-                        "game's own copy.</span>")
-            return (f"<span style='color:{pal.fg_dim}'>no <b>{name}</b> "
-                    "on disk — kovadapt has not written anything for this "
-                    "scenario yet, so the column above has nothing to compare "
-                    "against.</span>")
-        out = (f"<span style='color:{pal.fg_dim}'>variant written "
-               f"<b>{_esc(facts.written) or 'unknown'}</b>")
-        summary, unapplied = _plan_summary(facts)
-        if summary:
-            out += f" — {summary}"
-        out += "</span>"
-        if unapplied:
-            out += f"<br><span style='color:{pal.fg_dim}'>{unapplied}</span>"
-        check = size_check(self._profile, self.s, facts) if self._profile else ""
-        if check:
-            stale = "does not match" in check
-            out += (f"<br><span style='color:{pal.warn if stale else pal.fg_dim}'>"
-                    f"{check}</span>")
+                return (f"<span style='color:{pal.warn}'><b>{name}</b> 已存在，"
+                        "但无法读取，因此无法与基础场景比较，也无法验证游戏实际加载的内容。"
+                        "</span>")
+            return (f"<span style='color:{pal.fg_dim}'>磁盘上没有 <b>{name}</b>；"
+                    "kovadapt 尚未为该场景写入变体，因此上方只有计划值，没有文件对比。</span>")
+        out = (f"<span style='color:{pal.fg_dim}'>自适应变体写入时间："
+               f"<b>{_esc(facts.written) or '未知'}</b>。以上数值直接来自当前场景文件。</span>")
+        fields = _plan_fields(facts.description)
+        ramp = _esc(fields.get("speed", ""))
+        if facts.speed_path == "multiplier" and ramp:
+            out += (f"<br><span style='color:{pal.fg_dim}'>计划记录中的绝对 MaxSpeed "
+                    f"速度坡道 speed={ramp} 在此处<b>未写入</b>；目标自带速度，实际采用相对作者"
+                    "速度的倍率路径，以上 MaxSpeed 行才是游戏读取的值。</span>")
+        elif facts.speed_path == "ramp":
+            out += ("<br><span style='color:{pal.fg_dim}'>本场景目标的基础速度为 0，实际采用"
+                    "绝对 MaxSpeed 速度坡道；具体写入值见上方 MaxSpeed 行。</span>")
+        elif facts.speed_path == "mixed":
+            walls = "、".join(c for c, v in sorted(facts.authored.items()) if v == 0)
+            out += ("<br><span style='color:{pal.fg_dim}'>该场景混合两种速度路径：绝对 "
+                    f"MaxSpeed 速度坡道只写入基础速度为 0 的目标（{_esc(walls)}），其余目标"
+                    "按作者速度使用倍率调整。</span>")
         if facts.extra_sections:
             out += (f"<br><span style='color:{pal.fg_dim}'>"
-                    f"+{facts.extra_sections} more target/dodge sections are "
-                    "edited the same way and not listed here</span>")
+                    f"另有 {facts.extra_sections} 个目标或闪避配置段采用相同方式修改，"
+                    "此处未逐项列出。</span>")
         return out
 
     # -------------------------------------------------------------- motion

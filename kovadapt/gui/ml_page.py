@@ -163,13 +163,13 @@ class ZoneGridDiagram(_Diagram):
         if locked:
             p.setPen(QColor(pal.fg))
             p.drawText(QRectF(sx, self.Y0 + 18, 130, 16), Qt.AlignLeft,
-                       f"focus r{wr}c{wc}")
+                       f"重点 r{wr}c{wc}")
             p.setPen(QColor(pal.warn if explore else pal.accent))
             p.drawText(QRectF(sx, self.Y0 + 38, 130, 16), Qt.AlignLeft,
-                       "explore" if explore else "exploit")
+                       "探索" if explore else "利用")
         else:
             p.setPen(QColor(pal.fg_dim))
-            p.drawText(QRectF(sx, self.Y0 + 18, 130, 16), Qt.AlignLeft, "sampling…")
+            p.drawText(QRectF(sx, self.Y0 + 18, 130, 16), Qt.AlignLeft, "正在抽样…")
 
 
 class DeadbandDiagram(_Diagram):
@@ -230,10 +230,10 @@ class DeadbandDiagram(_Diagram):
         if in_band:
             p.setPen(QColor(pal.fg_dim))
             p.drawText(QRectF(cx - 130, ry, 260, 16), Qt.AlignCenter,
-                       "hold — inside the band")
+                       "保持 — 位于准确率区间内")
         else:
             shrink = acc > self.HIGH
-            label = "targets shrink" if shrink else "targets grow"
+            label = "缩小目标" if shrink else "放大目标"
             arrow = "v" if shrink else "^"
             col = QColor(pal.accent if shrink else pal.warn)
             p.setPen(QColor(pal.fg))
@@ -306,12 +306,12 @@ class OUTraceDiagram(_Diagram):
         # CAP_H, not 12: an 8pt face needs ~14px of line box, so a 12px rect
         # clipped its own descenders — "twitchy" lost its y and the axis
         # caption was cut through the middle.
-        p.drawText(QRectF(2, self.TY, 44, self.CAP_H), Qt.AlignLeft, "twitchy")
+        p.drawText(QRectF(2, self.TY, 44, self.CAP_H), Qt.AlignLeft, "剧烈")
         p.drawText(QRectF(2, self.TY + (self.ROWS - 1) * self.CHT, 44, self.CAP_H),
-                   Qt.AlignLeft, "calm")
+                   Qt.AlignLeft, "平稳")
         p.drawText(QRectF(self.LX, self.TY + self.ROWS * self.CHT + 4, 220,
                           self.CAP_H),
-                   Qt.AlignLeft, "one step per run →")
+                   Qt.AlignLeft, "每局前进一步 →")
 
 
 class FittsDiagram(_Diagram):
@@ -383,14 +383,14 @@ class FittsDiagram(_Diagram):
         p.setPen(QColor(pal.fg_dim))
         p.setFont(QFont("Segoe UI", 8))
         p.drawText(QRectF(ix, 22, 100, 14), Qt.AlignLeft,
-                   f"session {s + 1}/{len(self.SLOPES)}")
+                   f"训练 {s + 1}/{len(self.SLOPES)}")
         p.setFont(font)
         p.setPen(QColor(pal.accent))
         p.drawText(QRectF(ix, 40, 104, 16), Qt.AlignLeft,
-                   f"b = {self.SLOPES[s]} ms/bit")
+                   f"b = {self.SLOPES[s]} 毫秒/比特")
         if s > 0:
             p.setPen(QColor(pal.good))
-            p.drawText(QRectF(ix, 60, 100, 16), Qt.AlignLeft, "v falling")
+            p.drawText(QRectF(ix, 60, 100, 16), Qt.AlignLeft, "v 正在下降")
         p.setPen(QColor(pal.fg_dim))
         p.setFont(QFont("Segoe UI", 8))
         p.drawText(QRectF(self.PL, self.PB + 6, self.PR - self.PL, 14),
@@ -531,6 +531,58 @@ _CLOSING = (
     "whatever you are currently worst at."
 )
 
+# Simplified-Chinese display copy. Knowledge-base ids, formulas and persisted
+# model fields stay unchanged; only the prose shown by this page is localized.
+_LEDE_ZH = (
+    "kovadapt 建立在运动学习研究中的一个核心结论上：相对于训练者能力，难度处于中等水平时，"
+    "练习效率通常最高，这就是<i>挑战点</i>。任务太简单时缺少新的学习信息，太难时又超出当前"
+    "处理能力。因此，合适的难度属于具体玩家和当次训练，而不是某个固定场景文件。KovaaK's "
+    "没有模组接口，所以 kovadapt 选择在每局之间工作：一局结束后读取表现、更新模型，再在下一局"
+    "加载前写出新的自适应版本。训练与调整由此形成连续循环。"
+)
+_GOVERNOR_ZH = (
+    "模型中央不是一个固定准确率目标，而是一段允许区间：点击类训练默认维持在 85%–95%，"
+    "并在这个约束下提高速度。低于下限说明当前难度可能导致大量无法控制的失误；高于上限则说明"
+    "任务可能过于舒适，应当提高节奏。kovadapt 用目标大小实现带死区的控制：区间内保持不动，"
+    "越过边界后只根据超出的幅度调整，因此轻微偏离只会得到轻微修正。跟枪和目标切换使用由同一"
+    "控制规律外推的独立区间，界面会明确标注这一点。"
+)
+_FLICK_ZH = (
+    "单看结果无法区分不同问题：一次未命中既可能是甩枪方向错误，也可能是方向正确但到达太慢。"
+    "因此模型会读取原始鼠标输入，把瞄准动作分成主要的快速移动和之后的修正子动作，并分别测量"
+    "过冲与修正次数。过冲后立即开火、几乎不修正，可能是速度任务中的主动扫过策略；过冲后连续"
+    "多次回拉，则更像控制问题。相同的命中结果可能需要完全不同的训练建议，鼠标轨迹负责区分它们。"
+)
+_BANDIT_ZH = (
+    "弱项具有空间位置。每次甩枪会被映射到墙面上的 5×5 网格：方向决定方位，幅度决定离中心的"
+    "距离。每个区域都保存一个关于相对弱项程度的概率分布，随后通过 Thompson Sampling 选择"
+    "下一轮重点区域。多数选择会利用已知弱项，也会主动探索证据不足的区域。每局还会让旧证据向"
+    "先验回退 3%，避免模型永远追着一个已经改正的弱点。"
+)
+_FITTS_ZH = (
+    "分数可能停滞，单次高分也容易受到运气影响。Fitts 定律提供了更稳定的量："
+    "MT = a + b·ID，其中 ID = log<sub>2</sub>(D/W + 1)。目标越小、距离越远，动作所需时间越长；"
+    "斜率 b 表示每增加一比特难度所付出的毫秒数。kovadapt 在每局内拟合这一斜率，并观察跨局变化。"
+    "即使总分持平，只要毫秒/比特持续下降，也表示真实的运动效率提升；当准确率舒适但吞吐量停止"
+    "改善时，控制器会额外小幅提高难度。"
+)
+_MOVEMENT_ZH = (
+    "固定不变的训练容易让人记住节奏。目标微移动由 Ornstein–Uhlenbeck 均值回归随机过程驱动："
+    "相邻两局变化平滑，却不会形成可预测节拍。击杀节奏高于个人基线时，移动强度会立即上升；"
+    "若准确率处于区间内而最近十局节奏停滞，系统也会给移动强度一个有界的上推。方向偏差证据还会"
+    "让目标在较弱的一侧停留得更久，从而增加弱侧训练量。"
+)
+_REFUSALS_ZH = (
+    "模型同样重视<i>拒绝下结论</i>。每条建议都附带证据、推理、置信度和来源；存在争议或属于"
+    "外推的内容会明确标注。灵敏度就是典型例子：高灵敏度可能放大过冲，过低灵敏度可能增加抬鼠和"
+    "肢体速度成本，但可用范围很宽，因此系统只呈现正反两面的依据，不强迫修改。当输入回报率过低或"
+    "时序抖动过高时，所有依赖甩枪微结构的诊断都会暂停，避免把硬件或系统噪声误判为玩家问题。"
+)
+_CLOSING_ZH = (
+    "这一切都发生在两局之间：刚结束的训练被测量，模型更新对你的认识，自适应场景随即重新写入。"
+    "等下一局加载时，任务已经转向你当前最需要加强的地方。"
+)
+
 
 # --------------------------------------------------------------------- page
 class MLPage(QWidget):
@@ -557,54 +609,52 @@ class MLPage(QWidget):
         self._lay.setContentsMargins(0, 0, 0, 0)
         self._lay.setSpacing(12)
         self._lay.addWidget(HintBar(settings, (
-            "This page is the model documenting itself. Every part ends in a dim "
-            "<b>sources</b> line naming the knowledge-base entries behind it — hover "
-            "one for the full citations. The diagrams are live; ids like "
-            "<code>p-…</code>/<code>dx-…</code> live in <code>analysis/kb.py</code>.")))
+            "本页解释模型如何做出调整。每一节末尾都有一行<b>来源</b>，列出对应的知识库条目；"
+            "悬停即可查看完整引用。图表会实时演示控制过程；<code>p-…</code> 和 "
+            "<code>dx-…</code> 是 <code>analysis/kb.py</code> 中保留的证据 ID。")))
 
-        self._prose(_LEDE)
+        self._prose(_LEDE_ZH)
         self._sources("p-challenge-point")
 
-        self._section("The governor: accuracy is the constraint, speed is the variable")
-        self._prose(_GOVERNOR)
+        self._section("核心控制器：准确率是约束，速度是变量")
+        self._prose(_GOVERNOR_ZH)
         self._figure(DeadbandDiagram(), (
-            "Live: the accuracy dot drifts against the [ 85 – 95 ] band; target size "
-            "reacts only outside the brackets — shrink above, grow below, hold inside."))
+            "实时演示：准确率圆点相对于 [ 85 — 95 ] 区间移动；高于区间缩小目标，"
+            "低于区间放大目标，位于区间内则保持不变。"))
         self._sources("p-speed-accuracy-governor", "p-speed-is-growth-axis",
                       "dx-acc-above-band", "dx-acc-below-band")
 
-        self._section("What the mouse actually says")
-        self._prose(_FLICK)
+        self._section("鼠标轨迹真正说明了什么")
+        self._prose(_FLICK_ZH)
         self._sources("p-two-phase-flick", "p-swipiness", "dx-overshoot-strategic")
 
-        self._section("The zone bandit: weakness has a geography")
-        self._prose(_BANDIT)
+        self._section("区域老虎机：弱项具有空间位置")
+        self._prose(_BANDIT_ZH)
         self._figure(ZoneGridDiagram(), (
-            "Live: a Thompson round on the 5×5 zone grid — every cell's belief is "
-            "sampled and the worst draw takes the focus; amber wins are exploration."))
+            "实时演示：在 5×5 网格上进行一次 Thompson 抽样；每个区域都参与抽样，"
+            "最弱的抽样结果成为训练重点，琥珀色表示探索。"))
         self._sources("p-weakness-isolation", "p-rest-position", "dx-region-deficit")
 
-        self._section("The honest number: milliseconds per bit")
-        self._prose(_FITTS)
+        self._section("更诚实的指标：每比特所需毫秒数")
+        self._prose(_FITTS_ZH)
         self._figure(FittsDiagram(), (
-            "Live: one session's flicks (×) against difficulty in bits, with the fitted "
-            "line — the slope, in ms per bit, falls across sessions as the motor system "
-            "learns; earlier fits ghost behind it."))
+            "实时演示：甩枪样本（×）相对于比特难度绘制，并拟合趋势线。随着运动系统学习，"
+            "每比特毫秒数会逐次下降，较早的拟合线以淡色保留。"))
         self._sources("p-fitts-throughput", "dx-fitts-progress")
 
-        self._section("Movement that refuses to be memorized")
-        self._prose(_MOVEMENT)
+        self._section("无法被背板记住的目标移动")
+        self._prose(_MOVEMENT_ZH)
         self._figure(OUTraceDiagram(), (
-            "Live: the Ornstein-Uhlenbeck drift that sets movement intensity — always "
-            "wandering, always pulled back toward the middle, never the same twice."))
+            "实时演示：Ornstein–Uhlenbeck 漂移控制移动强度；持续变化、始终被拉回中间值，"
+            "又不会连续两次完全相同。"))
         self._sources("p-contextual-interference", "p-speed-is-growth-axis", "dx-bias")
 
-        self._section("What kovadapt refuses to do")
-        self._prose(_REFUSALS)
+        self._section("kovadapt 会拒绝做什么")
+        self._prose(_REFUSALS_ZH)
         self._sources("p-sensitivity-doctrine", "dx-input-health")
 
         self._lay.addSpacing(6)
-        self._prose(_CLOSING)
+        self._prose(_CLOSING_ZH)
         self._lay.addStretch(1)
 
     # ---------------------------------------------------------- construction
@@ -654,7 +704,7 @@ class MLPage(QWidget):
             srcs = "\n    ".join(entry.get("sources", ()))
             tips.append(f"{kid} — {head} [{entry.get('confidence', '')}]\n    {srcs}")
             self.cited_ids.add(kid)
-        lab = QLabel("sources: " + "  ·  ".join(
+        lab = QLabel("来源：" + "  ·  ".join(
             k for k in ids if k in self.cited_ids) + "    — analysis/kb.py")
         lab.setProperty("dim", True)
         lab.setStyleSheet("font-size: 11px;")

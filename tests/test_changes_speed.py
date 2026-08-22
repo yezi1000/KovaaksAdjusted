@@ -341,17 +341,16 @@ def test_the_provenance_never_quotes_a_ramp_the_multiplier_path_did_not_write(
 
     assert facts.description not in view.provenance.text(), \
         "the header may not be echoed verbatim — not every number in it landed"
-    assert "NOT written here" in text and f"speed={ramp}" in text, \
+    assert "未写入" in text and f"speed={ramp}" in text, \
         "the ramp figure has to be named as the thing that did NOT apply"
-    assert "multiplier path" in text
+    assert "倍率路径" in text
     # …and it appears nowhere else on the page, in particular not as an applied
     # field of the plan record
-    applied = text.split("its record also carries")[0]
-    assert f"speed={ramp}" not in applied
-    assert "u/s" not in applied
+    assert text.count(f"speed={ramp}") == 1
+    assert "u/s" not in text
     # the raw header stays reachable, as raw text, in the tooltip
     assert facts.description in view.provenance.toolTip()
-    assert "verbatim" in view.provenance.toolTip()
+    assert "Description 原始记录：" in view.provenance.toolTip()
     view.deleteLater()
 
 
@@ -367,9 +366,9 @@ def test_the_provenance_names_the_ramp_path_where_the_ramp_applied(tmp_path, qap
     view = _page(s)
     text = _plain(view.provenance.text())
     assert view._facts.speed_path == "ramp"
-    assert "the absolute MaxSpeed ramp" in text
-    assert "MaxSpeed rows above carry what was written" in text
-    assert "NOT written here" not in text
+    assert "绝对 MaxSpeed 速度坡道" in text
+    assert "具体写入值见上方 MaxSpeed 行" in text
+    assert "未写入" not in text
     assert f"{plan.target_max_speed:.0f} u/s" not in text and "speed=" not in text
     assert float(_speed_row(view._facts).adaptive) == pytest.approx(
         plan.target_max_speed), "and the ledger carries the exact written number"
@@ -385,9 +384,9 @@ def test_a_mixed_scenario_says_which_characters_the_ramp_reached(tmp_path, qapp)
     view = _page(s)
     text = _plain(view.provenance.text())
     assert view._facts.speed_path == "mixed"
-    assert "the absolute MaxSpeed ramp" in text
-    assert "only to the base-speed-0 targets (char2)" in text
-    assert "char1" not in text.split("only to the base-speed-0")[1]
+    assert "绝对 MaxSpeed 速度坡道" in text
+    assert "只写入基础速度为 0 的目标（char2）" in text
+    assert "char1" not in text.split("只写入基础速度为 0 的目标")[1]
     # the ledger is the surface that reports per character, and it still does
     assert float(_speed_row(view._facts, "char1").adaptive) > 170.0
     assert 0.0 < float(_speed_row(view._facts, "char2").adaptive) <= 170.0
@@ -449,9 +448,9 @@ def test_the_pending_clause_never_claims_a_file_it_did_not_look_for(
     for text in surfaces:
         assert "no [Adaptive] file has been written yet" not in text
         assert "not written yet" not in text
-    assert "IS on disk" in " ".join(k.note for k in view._knobs)
-    assert "is on disk" in _plain(view.provenance.text())
-    assert "base .sce is missing" in view.headline.text()
+    assert "确实存在 [Adaptive] 文件" in " ".join(k.note for k in view._knobs)
+    assert "已存在" in _plain(view.provenance.text())
+    assert "缺少基础 .sce 文件" in view.headline.text()
     view.deleteLater()
 
 
@@ -482,7 +481,7 @@ def test_an_unreadable_variant_is_not_reported_as_an_absent_one(
     text = " ".join([view.headline.text(), _plain(view.provenance.text()),
                      _plain(view.spawn_note.text())]
                     + [k.note for k in view._knobs])
-    assert "could not be read" in text
+    assert "无法读取" in text
     assert "has not written anything" not in text
     assert "no [Adaptive] file has been written yet" not in text
     assert "no variant has been written yet" not in text
@@ -495,8 +494,8 @@ def test_a_missing_variant_still_reads_as_a_missing_variant(tmp_path, qapp):
     prof = _trained()
     prof.save(s.profile_path)
     view = _page(s)
-    assert "no [Adaptive] file has been written yet" in view.headline.text()
-    assert all("not written yet" in k.note
+    assert "尚未写入场景" in view.headline.text()
+    assert all("尚未写入" in k.note
                for k in view._knobs if k.measured)
     view.deleteLater()
 

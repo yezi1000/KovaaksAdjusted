@@ -262,7 +262,7 @@ def test_the_analysis_page_never_pairs_a_noisy_title_with_a_ratio(qapp, pal, tmp
 
     view = AnalysisView(settings)
     view.show_report(rep, profile=prof)
-    assert "too noisy" in view.bias_bars._title.lower()
+    assert "时序噪声过大" in view.bias_bars._title
     assert view.bias_bars.ratio_footer() == "", (
         "the panel spells out a ratio its own title calls impossible")
     arr = _shot(view.bias_bars, pal, 690, 300)

@@ -16,6 +16,7 @@ clause says why, rather than a fake zero.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -220,6 +221,83 @@ def load_hero(profile: PlayerProfile, fatigue: dict | None,
         "so a day spread across several scenarios counts only the selected "
         "one. Buckets: 1-14 light, 15-39 steady, 40+ heavy — a session-length "
         "cue, not a fatigue measurement.")
+
+
+def localized_hero(metric: str, hero: Hero) -> Hero:
+    """Translate a dashboard reading at the display boundary.
+
+    The calculation helpers intentionally keep their stable English output for
+    CLI/tests; only the GUI card receives the localized copy.
+    """
+    words = {
+        "no runs yet": "暂无记录", "too few runs": "数据不足",
+        "no baseline": "暂无基线", "cold start": "冷启动",
+        "learning": "学习中", "calibrating": "校准中", "dialed in": "已就绪",
+        "climbing": "上升", "dipping": "下降", "holding": "稳定",
+        "idle": "未训练", "light": "轻量", "steady": "适中", "heavy": "较高",
+        "fresh": "状态良好", "declining": "正在下降", "fatigued": "已疲劳",
+    }
+    word = words.get(hero.word, hero.word)
+
+    if metric == "readiness":
+        if hero.value == "—":
+            because = "该场景还没有历史记录；完成第一局后开始计算准备度"
+        else:
+            detail = hero.because.removeprefix("because ")
+            detail = re.sub(r"runs (\d+)/(\d+)", r"基线局数 \1/\2", detail)
+            detail = re.sub(
+                r"regions (\d+)/(\d+) mapped \((\d+)\+ observations each\)",
+                r"已映射区域 \1/\2（每区至少 \3 次观测）", detail)
+            detail = detail.replace("bias evidence collected", "方向偏差证据已收集")
+            detail = re.sub(
+                r"bias evidence (\d+)/(\d+) measurements",
+                r"方向偏差证据 \1/\2 次", detail)
+            because = "依据：" + detail
+        tip = ("准备度由三部分组成：稳定的准确率基线占 50%，有足够证据的墙面区域占 35%，"
+               "方向偏差证据占 15%。数值越高，个性化调整越可靠。")
+    elif metric == "form":
+        if hero.word == "too few runs":
+            count = re.search(r"this scenario has (\d+)", hero.because)
+            because = (f"至少需要 {FORM_MIN_RUNS} 局才能比较近期表现；当前只有 "
+                       f"{count.group(1) if count else 0} 局")
+        elif hero.word == "no baseline":
+            because = "准确率的指数移动平均仍为 0，目前没有可供比较的个人基线"
+        else:
+            match = re.search(
+                r"last (\d+) runs average ([\d.]+%) against a ([\d.]+%)", hero.because)
+            because = (f"依据：最近 {match.group(1)} 局平均准确率 {match.group(2)}，"
+                       f"个人基线为 {match.group(3)}"
+                       if match else "依据：近期准确率与个人长期基线的差值")
+        tip = ("近期状态 = 最近几局的平均准确率 − 个人准确率 EWMA 基线，单位为百分点。"
+               "下降也可能是上一轮提高了难度，并不一定代表能力退步。")
+    else:
+        value_match = re.match(r"(\d+) runs?", hero.value)
+        value = f"{value_match.group(1)} 局" if value_match else hero.value
+        if hero.value == "—":
+            because = "该场景尚无记录，暂时无法判断本次训练的疲劳趋势或训练量"
+        elif hero.value.endswith("%"):
+            drift = re.search(
+                r"flick quality is (.+) across (\d+) telemetry runs", hero.because)
+            drift_text = drift.group(1) if drift else ""
+            drift_text = re.sub(r"degrading ([\d.]+%) per run", r"每局恶化 \1", drift_text)
+            drift_text = re.sub(r"improving ([\d.]+%) per run", r"每局改善 \1", drift_text)
+            drift_text = drift_text.replace("flat", "基本持平")
+            because = (f"依据：本次训练 {drift.group(2)} 局遥测中，甩枪质量{drift_text}"
+                       if drift else "依据：本次训练的甩枪质量趋势")
+        else:
+            today = value_match.group(1) if value_match else "0"
+            because = f"今天在该场景完成了 {today} 局；遥测样本足够后会改为显示疲劳趋势"
+        tip = ("有足够鼠标遥测时，训练负荷显示本次训练中甩枪质量的疲劳趋势；"
+               "证据不足时退回显示今天在当前场景的训练局数。")
+        translated_message = {
+            "Flick quality has dropped steadily this session — a 10-15 minute break will likely gain you more than grinding on.":
+                "本次训练的甩枪质量持续下降；休息 10–15 分钟通常比继续硬练更有效。",
+            "Flick quality is trending down — consider a short break soon.":
+                "甩枪质量正在下降，建议近期安排一次短暂休息。",
+        }
+        tip = translated_message.get(hero.tip, tip)
+        return Hero(value, word, because, hero.tone, tip)
+    return Hero(hero.value, word, because, hero.tone, tip)
 
 
 def _mono_css(px: int) -> str:
@@ -762,11 +840,16 @@ class Dashboard(QWidget):
         prof = PlayerProfile.load(base_name + ADAPTIVE_SUFFIX, self.s.profile_path)
         self._last_profile = prof
         self.heroes["readiness"].show_hero(
-            readiness_hero(prof, self.s.region_cols * self.s.region_rows))
-        self.heroes["form"].show_hero(form_hero(prof, self.s.ewma_half_life))
+            localized_hero(
+                "readiness",
+                readiness_hero(prof, self.s.region_cols * self.s.region_rows)))
+        self.heroes["form"].show_hero(
+            localized_hero("form", form_hero(prof, self.s.ewma_half_life)))
         self.heroes["load"].show_hero(
-            load_hero(prof, self._fatigue, self.s.fatigue_min_runs,
-                      telemetry_on=self.s.telemetry_enabled))
+            localized_hero(
+                "load",
+                load_hero(prof, self._fatigue, self.s.fatigue_min_runs,
+                          telemetry_on=self.s.telemetry_enabled)))
         accs = [float(h.get("accuracy", 0.0)) for h in prof.history[-60:]]
         if len(accs) >= 2:
             # Cite the real run numbers: the list is sliced, so without this

@@ -40,6 +40,7 @@ from kovadapt.gui.analysis_view import (  # noqa: E402
     _DEFICIT_TITLE,
     _TRAVEL_TITLE,
     AnalysisView,
+    analysis_zh,
     _bias_title,
     _deficit_title,
     _travel_title,
@@ -127,15 +128,15 @@ def test_kpi_strip_reads_the_run_in_mono(qapp, settings):
         profile=_profile())
 
     assert view.kpis["accuracy"].value.text() == "61%"
-    assert view.kpis["accuracy"].unit.text() == "hit rate"
-    assert view.kpis["accuracy"].read.text() == "below-band"   # band is 85-95%
+    assert view.kpis["accuracy"].unit.text() == analysis_zh("hit rate")
+    assert view.kpis["accuracy"].read.text() == analysis_zh("below-band")
     assert view.kpis["kills"].value.text() == "30"
-    assert view.kpis["kills"].read.text() == "24 flicks"       # evidence behind the charts
+    assert view.kpis["kills"].read.text() == "24 次甩枪"
     assert view.kpis["pace"].value.text() == "1.40"
-    assert view.kpis["pace"].unit.text() == "kills/s"
-    assert view.kpis["pace"].read.text() == "faster"           # 1.40 vs the 1.00 EWMA
+    assert view.kpis["pace"].unit.text() == analysis_zh("kills/s")
+    assert view.kpis["pace"].read.text() == analysis_zh("faster")
     assert view.kpis["flick"].value.text() == "180"
-    assert view.kpis["flick"].read.text() == "repaired"        # 40% overshoot, 2.4 fixes
+    assert view.kpis["flick"].read.text() == analysis_zh("repaired")
 
     for tile in view.kpis.values():
         assert tile.toolTip()                                  # cite everything
@@ -152,15 +153,15 @@ def test_kpi_reads_state_their_baseline_when_they_have_none(qapp, settings):
     """No profile history: the pace tile must say so, not invent a comparison."""
     view = AnalysisView(settings)
     view.show_report(_report(), profile=PlayerProfile(scenario="cold"))
-    assert view.kpis["pace"].read.text() == "no-baseline"
+    assert view.kpis["pace"].read.text() == analysis_zh("no-baseline")
     # observe_run seeds every EWMA to the first run's own value, so a
     # baseline only exists from run 2 — before that the tile must say why
     # rather than compare the run against itself and call it "steady".
     tip = view.kpis["pace"].toolTip()
     assert "baseline" in tip and "seeded from the first run" in tip
-    assert view.kpis["kills"].read.text() == "no-telemetry"
+    assert view.kpis["kills"].read.text() == analysis_zh("no-telemetry")
     assert view.kpis["flick"].value.text() == "—"
-    assert view.kpis["flick"].read.text() == "thin-data"
+    assert view.kpis["flick"].read.text() == analysis_zh("thin-data")
     view.deleteLater()
 
 
@@ -170,7 +171,7 @@ def test_kpi_reads_state_their_baseline_when_they_have_none(qapp, settings):
 def test_accuracy_read_follows_the_archetype_band(qapp, settings, accuracy, read):
     view = AnalysisView(settings)
     view.show_report(_report(accuracy=accuracy), profile=_profile())
-    assert view.kpis["accuracy"].read.text() == read
+    assert view.kpis["accuracy"].read.text() == analysis_zh(read)
     view.deleteLater()
 
 
@@ -200,11 +201,11 @@ def test_coach_folds_to_the_two_worst_and_keeps_every_card(qapp, settings):
     assert [c.isHidden() for c in cards[:_COACH_FOLD]] == [False] * _COACH_FOLD
     assert all(c.isHidden() for c in cards[_COACH_FOLD:])
     assert view.coach_more is not None
-    assert view.coach_more.text() == f"show all ({len(cards)})"
+    assert view.coach_more.text() == f"显示全部（{len(cards)}）"
 
     view.coach_more.click()
     assert not any(c.isHidden() for c in cards)     # nothing was ever deleted
-    assert view.coach_more.text() == "show fewer"
+    assert view.coach_more.text() == "收起"
     view.coach_more.click()
     assert all(c.isHidden() for c in cards[_COACH_FOLD:])
     view.deleteLater()
@@ -218,7 +219,7 @@ def test_a_new_report_opens_folded_again(qapp, settings):
     assert view._coach_open
     view.show_report(rep, profile=prof)
     assert not view._coach_open
-    assert view.coach_more.text().startswith("show all")
+    assert view.coach_more.text().startswith("显示全部")
     view.deleteLater()
 
 
@@ -305,13 +306,13 @@ def test_takeaway_titles_reach_the_widgets(qapp, settings):
     view.show_report(_report(bias=bias, region_deficits={"r0c0": 1.4, "r2c2": -0.5},
                              n_flicks=26),
                      profile=prof)
-    assert "2.0x" in view.bias_bars._title
-    assert view.heat_map._title.startswith("weakest zone")
-    assert view.trend_spark._title != "accuracy over runs"    # 6 runs of history
+    assert "2.0 倍" in view.bias_bars._title
+    assert view.heat_map._title.startswith("本局最弱区域")
+    assert view.trend_spark._title != analysis_zh("accuracy over runs")
     # a bare report claims nothing
     view.show_report(_report(), profile=prof)
-    assert view.bias_bars._title == _BIAS_TITLE
-    assert view.heat_map._title == _TRAVEL_TITLE
+    assert view.bias_bars._title == analysis_zh(_BIAS_TITLE)
+    assert view.heat_map._title == analysis_zh(_TRAVEL_TITLE)
     view.deleteLater()
 
 
@@ -391,10 +392,10 @@ def test_kpi_flick_tile_honours_the_coachs_input_health_gate(qapp, settings):
 
     view = AnalysisView(settings)
     view.show_report(clean, profile=_profile())
-    assert view.kpis["flick"].read.text() == "repaired"
+    assert view.kpis["flick"].read.text() == analysis_zh("repaired")
 
     view.show_report(noisy, profile=_profile())
-    assert view.kpis["flick"].read.text() == "noisy-input", (
+    assert view.kpis["flick"].read.text() == analysis_zh("noisy-input"), (
         "the tile gave an overshoot verdict the Coach refuses to give")
     assert "too noisy" in view.kpis["flick"].toolTip()
     # and the Coach really is suppressing on the same report
@@ -477,8 +478,8 @@ def test_no_surface_gives_a_microstructure_verdict_on_a_noisy_run(qapp, settings
     view = AnalysisView(settings)
     view.show_report(noisy, profile=_profile())
 
-    assert view.kpis["flick"].read.text() == "noisy-input"
-    assert "too noisy" in view.bias_bars._title.lower()
+    assert view.kpis["flick"].read.text() == analysis_zh("noisy-input")
+    assert "噪声" in view.bias_bars._title
     # the summary the watcher writes into the report must not prescribe either
     from kovadapt.analysis.report import _summary_text
     summary = _summary_text(noisy, flicks_exist=True)
@@ -626,7 +627,7 @@ def test_pace_is_not_measurable_on_a_tracking_run(qapp, settings):
 
     tile = view.kpis["pace"]
     assert tile.value.text() == "—", "a fake zero, not a measurement"
-    assert tile.read.text() == "not-measurable"
+    assert tile.read.text() == analysis_zh("not-measurable")
     tip = tile.toolTip().lower()
     assert "invincible" in tip, tip
     assert "seeded from the first run" not in tip, "the false reason came back"
@@ -643,7 +644,7 @@ def test_pace_still_reads_normally_when_there_are_kills(qapp, settings):
     view.show_report(_report(kills=30, kps=1.4), profile=prof)
     tile = view.kpis["pace"]
     assert tile.value.text() == "1.40"
-    assert tile.read.text() == "faster"
+    assert tile.read.text() == analysis_zh("faster")
     assert "1.00 EWMA" in tile.toolTip()
     view.deleteLater()
 
@@ -763,8 +764,8 @@ def test_the_headline_does_not_compute_a_ratio_between_two_zeros(qapp, settings)
     title = view.bias_bars._title.lower()
     assert "x more" not in title, f"a ratio off noise: {title!r}"
     assert "0.00 vs 0.00" not in title
-    assert "no measurable cost" in title, title
-    assert "red bar" not in view.bias_caption.text(), (
+    assert "没有可测量" in title, title
+    assert "红色" not in view.bias_caption.text(), (
         "nothing is red on this panel — the highlight is gated too")
     view.deleteLater()
 
@@ -775,8 +776,8 @@ def test_a_real_bias_still_gets_its_headline_and_its_red_bar(qapp, settings):
     view.show_report(_report(n_flicks=119, bias=_bias(
         left=0.42, vertical=0.10, right=0.16)))
 
-    assert "x more" in view.bias_bars._title.lower(), view.bias_bars._title
-    assert "red bar is this run's worst" in view.bias_caption.text()
+    assert "倍" in view.bias_bars._title, view.bias_bars._title
+    assert "红色表示本局代价最高" in view.bias_caption.text()
     view.deleteLater()
 
 
@@ -878,12 +879,12 @@ def test_the_replay_transport_is_dead_until_there_is_something_to_replay(
     # A run with NO notable moments legitimately keeps the placeholder — the
     # panel still has to say what it is for; a run that HAS them replaces it.
     from kovadapt.gui.analysis_view import _MOMENTS_EMPTY
-    assert view.moments.item(0).text() == _MOMENTS_EMPTY, (
+    assert view.moments.item(0).text() == analysis_zh(_MOMENTS_EMPTY), (
         "a run with no notable moments left the panel blank again")
     view.show_report(_report(n_flicks=2, notable=[
         {"t_start": 1000.0, "t_end": 1000.4, "kind": "overshoot",
          "text": "Overshot a right flick by 36%."}]), trace=tr)
-    assert view.moments.item(0).text() != _MOMENTS_EMPTY, (
+    assert view.moments.item(0).text() != analysis_zh(_MOMENTS_EMPTY), (
         "the placeholder survived a run that produced moments")
     view.deleteLater()
 
@@ -959,8 +960,9 @@ def test_the_bias_panel_never_names_two_different_worst_directions(qapp, setting
         "right": {"n": 57, "overshoot": 0.042, "corrections": 0.0}}))
 
     dirs = ["left", "vertical", "right"]
+    shown_dirs = ["左侧", "垂直", "右侧"]
     title = view.bias_bars._title.lower()
-    named = [d for d in dirs if d in title]
+    named = [i for i, d in enumerate(shown_dirs) if d in title]
     assert named, f"the headline names no direction at all: {title!r}"
 
     # WHICH BAR IS ACTUALLY RED — read off the render, not off the stored
@@ -968,7 +970,7 @@ def test_the_bias_panel_never_names_two_different_worst_directions(qapp, setting
     # painted something other than what the caller claimed.
     marked = _red_bar_row(view.bias_bars, len(dirs))
     assert marked is not None, "a headline naming a worst side marked no bar"
-    assert dirs[marked] in named, (
+    assert marked in named, (
         f"the red bar is on {dirs[marked]!r} while the headline names "
         f"{named} — the panel is giving two answers")
 
@@ -1006,13 +1008,13 @@ def test_the_region_map_answers_to_the_same_gate_as_the_bias_panel(qapp, setting
     heat = view.heat_map._title.lower()
     assert "weakest zone" not in heat, (
         f"the map names a zone on a run the page calls too noisy: {heat!r}")
-    assert "noisy" in heat, heat
+    assert "噪声" in heat, heat
     # ...and a clean run still gets its verdict
     view.show_report(_report(
         n_flicks=119,
         input_health={"jitter_ms": 0.4, "polling_hz_est": 1000.0},
         region_deficits={"r2c2": 3.60, "r0c0": -0.4, "r1c1": 0.2}))
-    assert "weakest zone" in view.heat_map._title.lower()
+    assert "最弱区域" in view.heat_map._title
     view.deleteLater()
 
 
@@ -1028,14 +1030,14 @@ def test_a_run_with_no_flicks_does_not_claim_nothing_cost_enough(qapp, settings)
     view.show_report(_report(n_flicks=0, bias={
         d: {"n": 0, "overshoot": 0.0, "corrections": 0.0}
         for d in ("left", "vertical", "right")}))
-    assert view.bias_caption.text() == _BIAS_CAPTION_NO_FLICKS
-    assert "cost enough to rank" not in view.bias_caption.text()
+    assert view.bias_caption.text() == analysis_zh(_BIAS_CAPTION_NO_FLICKS)
+    assert "低于可判断阈值" not in view.bias_caption.text()
 
     # a run that DID measure flicks, all of which rounded to nothing, still
     # gets the measured sentence — the two states are not the same state
     view.show_report(_report(n_flicks=119, bias=_bias(
         left=0.004, vertical=0.002, right=0.003)))
-    assert view.bias_caption.text() == _BIAS_CAPTION_NO_COST
+    assert view.bias_caption.text() == analysis_zh(_BIAS_CAPTION_NO_COST)
     view.deleteLater()
 
 
@@ -1046,11 +1048,11 @@ def test_the_moments_placeholder_survives_a_run_that_produced_none(qapp, setting
     from kovadapt.gui.analysis_view import _MOMENTS_EMPTY
 
     view = AnalysisView(settings)
-    assert view.moments.item(0).text() == _MOMENTS_EMPTY
+    assert view.moments.item(0).text() == analysis_zh(_MOMENTS_EMPTY)
 
     view.show_report(_report(n_flicks=40))          # no notable moments
     assert view.moments.count() == 1
-    assert view.moments.item(0).text() == _MOMENTS_EMPTY, (
+    assert view.moments.item(0).text() == analysis_zh(_MOMENTS_EMPTY), (
         "a run with no notable moments left the panel blank")
     assert not (view.moments.item(0).flags() & Qt.ItemIsSelectable)
     view.deleteLater()
@@ -1085,7 +1087,7 @@ def test_a_saved_report_is_not_still_saying_what_was_true_when_it_was_written(
     assert "optimizer checkup" not in shown, (
         "it is still prescribing the cause this was changed to stop naming")
     # ...and the rest of the page agrees, which is the point
-    assert "x more" in view.bias_bars._title.lower(), (
+    assert "倍" in view.bias_bars._title, (
         "the bias chart withheld its verdict while the headline did not")
     view.deleteLater()
 
@@ -1122,8 +1124,8 @@ def test_a_saved_report_from_an_older_flick_floor_is_re_derived(qapp, settings):
         "the count on screen has to be the count the overlay drew"
     assert view.report.bias["bias_score"] != 0.87
     assert view.report.mean_flick_ms != 1234.0
-    assert "re-derived from the recording" in view.summary.text()
-    assert f"{MIN_FLICK_DEG:g}-degree" in view.summary.text()
+    assert "从轨迹重新计算" in view.summary.text()
+    assert f"{MIN_FLICK_DEG:g}°" in view.summary.text()
 
     # the caller's own object is untouched — it belongs to the caller, and the
     # watcher hands the same report to the profile write on the live path
@@ -1190,7 +1192,9 @@ def test_levelling_the_captions_does_not_ratchet_them_taller(qapp, settings):
 
     wide_first, wide_again = heights[1920]
     narrow = heights[1180][0]
-    assert narrow > wide_first, "the narrow width should wrap a caption at all"
+    # Chinese carries more meaning per glyph and may fit both widths on the
+    # same line; narrowing must never make the reservation smaller.
+    assert narrow >= wide_first
     assert wide_again == wide_first, (
         f"caption stuck at {wide_again}px after narrowing (was {wide_first}px) "
         "— the minimum from the narrow pass was never cleared")
@@ -1220,16 +1224,16 @@ def test_no_directional_verdict_on_a_scenario_that_lets_you_move(qapp, settings)
                     input_health={"jitter_ms": 0.3, "polling_hz_est": 1000.0})
     view.show_report(still, profile=_profile())
     QTest.qWait(30)
-    assert "cost" in view.bias_bars._title.lower() or "x" in view.bias_bars._title
+    assert "代价" in view.bias_bars._title or "倍" in view.bias_bars._title
 
     moving = _report(n_flicks=70, bias=lopsided, player_frame="MOBILE",
                      input_health={"jitter_ms": 0.3, "polling_hz_est": 1000.0})
     view.show_report(moving, profile=_profile())
     QTest.qWait(30)
     title = view.bias_bars._title
-    assert "lets you move" in title, title
-    assert "more than" not in title, "still called a side on a moving frame"
-    assert "measuring your strafing" in view.bias_caption.text()
+    assert "允许角色移动" in title, title
+    assert "倍" not in title, "still called a side on a moving frame"
+    assert "走位影响" in view.bias_caption.text()
 
     # an unrecorded frame is NOT a claim of stillness, but it also cannot
     # suppress — an older report simply predates the field
@@ -1237,6 +1241,6 @@ def test_no_directional_verdict_on_a_scenario_that_lets_you_move(qapp, settings)
                     input_health={"jitter_ms": 0.3, "polling_hz_est": 1000.0})
     view.show_report(blank, profile=_profile())
     QTest.qWait(30)
-    assert "lets you move" not in view.bias_bars._title
+    assert "允许角色移动" not in view.bias_bars._title
     view.close()
     view.deleteLater()

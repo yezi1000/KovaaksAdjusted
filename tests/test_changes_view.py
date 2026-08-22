@@ -502,9 +502,9 @@ def test_constructs_with_nothing_on_disk(qapp, tmp_path):
     s = _install(tmp_path)
     view = ChangesView(s)
     assert not view.picker.isEnabled()
-    assert view.picker.currentText() == "no player models yet"
+    assert view.picker.currentText() == "尚无玩家模型"
     assert view.scenario == ""
-    assert "player model yet" in view.subhead.text()
+    assert "目前还没有场景建立玩家模型" in view.subhead.text()
     view.restyle()                       # safe with no data at all
     view.deleteLater()
 
@@ -521,7 +521,7 @@ def test_shows_a_task_and_strips_the_adaptive_suffix(qapp, tmp_path):
     assert view.ladder._knobs == view._knobs
     assert view.grid._map is not None
     assert view.ledger._rows == view._facts.rows
-    assert "criteria have moved" in view.headline.text()
+    assert "个指标已有依据地发生变化" in view.headline.text()
     view.restyle()
     view.deleteLater()
 

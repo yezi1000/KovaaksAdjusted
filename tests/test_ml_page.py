@@ -71,7 +71,7 @@ def test_prose_is_real_and_placeholder_free(qapp, settings):
     for lab in page.prose:
         text = lab.text()
         assert text.strip()
-        assert len(text) > 200                  # paragraphs, not stubs
+        assert len(text) > 60                   # dense Chinese paragraphs, not stubs
         low = text.lower()
         for marker in ("todo", "fixme", "xxx", "lorem", "placeholder", "tbd"):
             assert marker not in low
@@ -96,7 +96,7 @@ def test_source_lines_cite_real_kb_ids(qapp, settings):
         assert expected in page.cited_ids
     assert len(page.source_lines) >= 7          # one line per cited part
     for lab in page.source_lines:
-        assert lab.text().startswith("sources:")
+        assert lab.text().startswith("来源：")
         assert lab.toolTip().strip()            # citations live in the tooltip
         assert lab.property("dim") is True
     page.deleteLater()

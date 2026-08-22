@@ -15,6 +15,7 @@ pyqtgraph remains only inside TrajectoryReplay's canvas."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -53,7 +54,6 @@ from ..analysis.report import (
     RunReport,
     apply_flick_metrics,
     input_degraded,
-    summary_text_for,
 )
 from ..analysis.sens import min_flick_counts
 from ..config import ADAPTIVE_SUFFIX, Settings
@@ -135,6 +135,99 @@ _DEFICIT_CAPTION = ("Weakness per wall region as z-scores against this run's own
 _TREND_CAPTION = ("Accuracy per run for this scenario — the loop should bend it "
                   "upward without ever pinning it at 100%.")
 
+
+def analysis_zh(text: str) -> str:
+    """Translate analysis display text without changing analytical outputs."""
+    exact = {
+        _BIAS_TITLE: "各方向甩枪质量 · 越低越好",
+        _TRAVEL_TITLE: "交战前后准星移动分布",
+        _DEFICIT_TITLE: "墙面区域弱项 · 越亮表示越弱",
+        _TREND_TITLE: "准确率变化趋势",
+        _BIAS_CAPTION_BASE: "单次甩枪代价 = 过冲比例 + 0.15 × 修正次数；每个方向一条。",
+        _BIAS_CAPTION: "单次甩枪代价 = 过冲比例 + 0.15 × 修正次数；红色表示本局代价最高的方向。",
+        _BIAS_CAPTION_DEGRADED: "输入时序噪声过大，本局不对各方向进行强弱排名。",
+        _BIAS_CAPTION_NO_COST: "本局各方向的代价都低于可判断阈值，因此不标记最差方向。",
+        _BIAS_CAPTION_NO_FLICKS: "本局没有记录到甩枪数据，暂时无法比较方向。",
+        _TRAVEL_CAPTION: ("显示每次交战前后准星停留的位置；字符越密表示在该区域停留越久。"
+                          "这个分布以每次射击点为中心重新对齐，用于观察准星习惯性停留在哪一侧；"
+                          "可悬停查看每个区域的具体数值。"),
+        _DEFICIT_CAPTION: ("显示各墙面区域相对于本局平均水平的弱项程度（z 分数）。"
+                           "字符越亮表示该区域的甩枪代价越高；描边区域尚未获得有效测量。"
+                           "区域编号与自适应引擎使用的 r{row}c{col} 网格一致，可悬停查看详情。"),
+        _TREND_CAPTION: "当前场景每局准确率；目标是随训练改善，而不是长期固定在 100%。",
+        _MOMENTS_EMPTY: "完成一局后，值得复盘的关键片段会显示在这里。",
+        "hit rate": "命中率", "kills": "击杀", "flicks": "次甩枪",
+        "no-telemetry": "无遥测", "kills/s": "击杀/秒",
+        "not-measurable": "无法测量", "above-band": "高于区间",
+        "below-band": "低于区间", "in-band": "位于区间内",
+        "faster": "更快", "slower": "更慢", "steady": "稳定",
+        "no-baseline": "暂无基线", "noisy-input": "输入噪声较大",
+        "thin-data": "样本不足", "repaired": "过冲后反复修正",
+        "clean": "干净", "mixed": "表现混合", "ms": "毫秒",
+    }
+    if text in exact:
+        return exact[text]
+    patterns = (
+        (r"(\d+) flicks", r"\1 次甩枪"),
+        (r"this scenario lets you move — sides are not comparable here", "该场景允许角色移动，左右方向不宜直接比较"),
+        (r"input timing too noisy to compare directions this run", "本局输入时序噪声过大，无法比较方向"),
+        (r"only (\d+) left / (\d+) right flicks — too few to call a side", r"仅记录到左侧 \1 次、右侧 \2 次甩枪，样本不足"),
+        (r"vertical flicks cost most — ([\d.]+) vs ([\d.]+) horizontal", r"垂直甩枪代价最高：\1，对比水平方向 \2"),
+        (r"no overshoot or correction cost in either direction", "各方向均未出现明显过冲或修正代价"),
+        (r"no measurable cost in either direction this run", "本局各方向都没有可测量的甩枪代价"),
+        (r"only your left flicks carry any cost — (.+)", r"只有左侧甩枪出现明显代价：\1"),
+        (r"only your right flicks carry any cost — (.+)", r"只有右侧甩枪出现明显代价：\1"),
+        (r"your left flicks cost ([\d.]+)x more than your right — (.+)",
+         r"左侧甩枪代价是右侧的 \1 倍：\2"),
+        (r"your right flicks cost ([\d.]+)x more than your left — (.+)",
+         r"右侧甩枪代价是左侧的 \1 倍：\2"),
+        (r"left and right flicks are even — (.+)", r"左右甩枪代价接近：\1"),
+        (r"input timing too noisy to rank zones this run", "本局输入时序噪声过大，无法对区域排序"),
+        (r"no zone stands out — all within (.+)", r"没有明显弱区：全部位于平均值附近（\1）"),
+        (r"no zone is weaker than your average — (.+) is your strongest, (.+)",
+         r"没有区域弱于个人平均；最强区域为 \1（\2）"),
+        (r"weakest zone this run: (.+), ([+-].+)", r"本局最弱区域：\1，高于平均值 \2"),
+        (r"aim travel is balanced left/right of your shots", "准星在射击点左右两侧的移动较均衡"),
+        (r"aim travel leans left — (.+)", r"准星移动偏左：\1"),
+        (r"aim travel leans right — (.+)", r"准星移动偏右：\1"),
+        (r"accuracy over (\d+) runs — too few to call a direction", r"共 \1 局，暂不足以判断准确率趋势"),
+        (r"accuracy flat near (.+) across (\d+) runs", r"最近 \2 局准确率稳定在 \1 附近"),
+        (r"accuracy up (\d+) points over (\d+) runs — (.+)", r"最近 \2 局准确率上升 \1 个百分点：\3"),
+        (r"accuracy down (\d+) points over (\d+) runs — (.+)", r"最近 \2 局准确率下降 \1 个百分点：\3"),
+        (r"(.+) No direction is marked worst: this scenario lets you move, so a side-by-side comparison would be measuring your strafing\.",
+         r"\1 该场景允许角色移动，左右比较会同时受到走位影响，因此不标记最差方向。"),
+    )
+    for pattern, replacement in patterns:
+        if re.fullmatch(pattern, text):
+            return re.sub(pattern, replacement, text)
+    return text
+
+
+def report_summary_zh(rep: RunReport) -> str:
+    """Concise Chinese summary derived from the same report fields."""
+    lines = [f"准确率 {rep.accuracy:.0%}，击杀 {rep.kills}，节奏 {rep.kps:.2f} 次/秒。"]
+    if not rep.n_flicks:
+        lines.append("本局没有鼠标遥测；开始分析并完成一局后才能进行移动与甩枪复盘。")
+        return " ".join(lines)
+    if input_degraded(rep):
+        ih = rep.input_health or {}
+        jitter = float(ih.get("jitter_ms", 0.0) or 0.0)
+        polling = float(ih.get("polling_hz_est", 0.0) or 0.0)
+        lines.append(
+            f"输入时序质量不足（估算回报率 {polling:.0f} Hz、抖动 {jitter:.1f} 毫秒），"
+            "因此本局不会给出过冲和方向偏差结论。")
+    else:
+        bias = float((rep.bias or {}).get("bias_score", 0.0) or 0.0)
+        if abs(bias) > 0.15:
+            lines.append(f"本局{'左侧' if bias > 0 else '右侧'}甩枪的代价明显更高。")
+        else:
+            lines.append("本局左右甩枪表现较均衡。")
+        if rep.overshoot_rate > 0.25:
+            lines.append(f"{rep.overshoot_rate:.0%} 的甩枪出现过冲，可结合下方修正次数判断原因。")
+    if rep.mean_flick_ms > 0:
+        lines.append(f"平均甩枪时间 {rep.mean_flick_ms:.0f} 毫秒。")
+    return " ".join(lines)
+
 # Claim floors. A takeaway has to clear one of these or the chart keeps its
 # neutral title; each is kovadapt's own editorial calibration except the
 # per-side flick count, which is analysis.directional_bias's own gate.
@@ -168,6 +261,72 @@ def _severity_color(severity: str, pal) -> str:
         min(_SEVERITY_RANK.get(severity, 2), 2)]
 
 
+def localized_insight(ins: Insight) -> tuple[str, str, str, str, str]:
+    """Chinese card copy keyed by the stable knowledge-base diagnostic id."""
+    copy = {
+        "dx-input-health": (
+            "输入质量正在影响分析",
+            "鼠标回报率或输入时序抖动不足以可靠识别细小修正动作，因此本局会暂停相关诊断。",
+            "先检查鼠标回报率、USB 连接和后台程序，再重新录制一局。"),
+        "dx-acc-above-band": (
+            "近期准确率持续高于训练区间",
+            "连续多局准确率过高通常表示任务已经过于舒适，继续保持当前难度带来的学习信息有限。",
+            "保持动作质量，同时主动提高节奏，或让自适应系统逐步缩小目标。"),
+        "dx-acc-below-band": (
+            "近期准确率低于训练区间下限",
+            "连续多局低于下限表示当前难度可能超过可稳定练习的范围，容易固化失控动作。",
+            "先降低节奏并恢复干净命中；自适应系统也会逐步放大目标。"),
+        "dx-overshoot-control": (
+            "过冲后进行了多次修正",
+            "甩枪经常越过目标，随后又通过连续小动作回拉，说明主要问题更接近制动与控制。",
+            "练习一次甩枪后只做一次小幅修正，减少反复拉扯。"),
+        "dx-overshoot-strategic": (
+            "过冲但几乎不修正，可能是主动速度策略",
+            "在准确率仍位于区间内时，过冲而不反复回拉可能来自速度任务中的扫过式击发。",
+            "先保持当前策略，继续观察跨局准确率和修正次数，不必仅因过冲立即降速。"),
+        "dx-tracking-jitter": (
+            "跟枪轨迹存在抖动",
+            "跟枪过程中出现较多修正子动作，准星可能在目标两侧频繁来回调整。",
+            "降低无效小修正，练习更连续、平滑的跟随动作。"),
+        "dx-switch-corrections": (
+            "目标切换需要额外修正",
+            "首次甩枪没有直接落到新目标，后续修正增加了每次目标获取的时间成本。",
+            "把重点放在首次落点，先追求一次到位，再提高切换速度。"),
+        "dx-bias": (
+            "左右方向存在持续差异",
+            "多局数据表明某一侧甩枪的过冲与修正代价长期更高，而不只是单局波动。",
+            "适当增加较弱一侧的训练量；自适应场景已会向该侧增加移动时间。"),
+        "dx-region-deficit": (
+            "跨局数据发现稳定弱区",
+            "墙面上的某个区域在多局中持续弱于个人平均水平，模型会把更多生成权重分配到那里。",
+            "保持正常训练，让模型继续验证该区域；弱项改善后旧证据会逐渐衰减。"),
+        "dx-fatigue": (
+            "本次训练出现疲劳趋势",
+            "过冲和甩枪时间在本次训练中同时恶化，继续硬练的收益可能已经下降。",
+            "安排一次短暂休息，回来后比较新的几局是否恢复。"),
+        "dx-fitts-progress": (
+            "总分持平，但运动效率仍在改善",
+            "分数没有明显变化时，击杀节奏上升或每比特动作时间下降仍代表真实进步。",
+            "继续以多局平均趋势评估进步，不要只看单次最高分。"),
+        "p-sensitivity-doctrine": (
+            "你的灵敏度：同时查看正反两面的证据",
+            "高、低灵敏度各有代价，当前证据并不足以支持单向结论；可用范围通常比单个推荐值更宽。",
+            "不强制建议任何方向。若要试改，只改变一个变量，并用多局平均结果进行判断。"),
+    }
+    title, body, prescription = copy.get(
+        ins.id,
+        (ins.title, "当前报告触发了知识库中的这条规则。", "结合多局趋势验证后再调整训练。"))
+    nums = re.findall(r"[+-]?\d+(?:\.\d+)?%?(?:\s?(?:ms|Hz|runs?|kills/s))?", ins.reasoning)
+    reasoning = "触发依据：当前报告达到该规则的判断条件"
+    if nums:
+        reasoning += "；相关数值包括 " + "、".join(nums[:8])
+    reasoning += "。"
+    confidence = ("高置信度" if "high" in ins.confidence.lower() else
+                  "中等置信度" if "medium" in ins.confidence.lower() else
+                  "参考结论")
+    return title, body, prescription, reasoning, confidence
+
+
 class _InsightCard(QFrame):
     """One coach insight: severity dot, title, sourced body + prescription,
     and the reasoning/citations chain (the cite-everything rule made visible)."""
@@ -178,13 +337,14 @@ class _InsightCard(QFrame):
         self.insight = ins       # the card's evidence, still queryable after build
         pal = theme.current()
         color = _severity_color(ins.severity, pal)
-        head = QLabel(f"<span style='color:{color}'>●</span>  <b>{ins.title}</b>"
-                      f"  <span style='color:{pal.fg_dim}'>{ins.confidence}</span>")
+        title, body_text, prescription, reasoning, confidence = localized_insight(ins)
+        head = QLabel(f"<span style='color:{color}'>●</span>  <b>{title}</b>"
+                      f"  <span style='color:{pal.fg_dim}'>{confidence}</span>")
         head.setTextFormat(Qt.RichText)
-        body = QLabel(f"{ins.body}<br><b>训练建议：</b> {ins.prescription}")
+        body = QLabel(f"{body_text}<br><b>训练建议：</b> {prescription}")
         body.setTextFormat(Qt.RichText)
         body.setWordWrap(True)
-        why = QLabel(f"依据：{ins.reasoning}")
+        why = QLabel(reasoning)
         why.setWordWrap(True)
         why.setProperty("dim", True)
         cites = QLabel(f"{len(ins.sources)} 个来源")
@@ -244,8 +404,8 @@ class _KpiTile(QFrame):
         """tone is a palette role name ('good' | 'warn' | 'bad' | 'dim');
         `why` is the tooltip that must justify the read."""
         self.value.setText(value)
-        self.unit.setText(unit)
-        self.read.setText(read)
+        self.unit.setText(analysis_zh(unit))
+        self.read.setText(analysis_zh(read))
         self._tone = tone
         self.setToolTip(why)
         self.restyle()
@@ -526,12 +686,12 @@ class AnalysisView(QWidget):
             kpi_lay.addWidget(tile, 1)
 
         # ---- charts: side by side, each with a takeaway title + short caption
-        self.bias_bars = viz.AsciiBars(title=_BIAS_TITLE)
-        self.bias_caption = _caption(_BIAS_CAPTION_BASE)
-        self.heat_map = viz.AsciiHeatmap(title=_TRAVEL_TITLE)
-        self.heat_caption = _caption(_TRAVEL_CAPTION)
-        self.trend_spark = viz.AsciiTrend(title=_TREND_TITLE, fmt="{:.0%}")
-        self.trend_caption = _caption(_TREND_CAPTION)
+        self.bias_bars = viz.AsciiBars(title=analysis_zh(_BIAS_TITLE))
+        self.bias_caption = _caption(analysis_zh(_BIAS_CAPTION_BASE))
+        self.heat_map = viz.AsciiHeatmap(title=analysis_zh(_TRAVEL_TITLE))
+        self.heat_caption = _caption(analysis_zh(_TRAVEL_CAPTION))
+        self.trend_spark = viz.AsciiTrend(title=analysis_zh(_TREND_TITLE), fmt="{:.0%}")
+        self.trend_caption = _caption(analysis_zh(_TREND_CAPTION))
 
         bias_w = QWidget()
         bv = QVBoxLayout(bias_w)
@@ -590,7 +750,7 @@ class AnalysisView(QWidget):
         # already existed — replay.clear() takes one — it was just never
         # reachable except through show_report.
         self.replay.clear("尚未加载训练数据 — 请完成一局，或从上方打开保存的报告")
-        empty = QListWidgetItem(_MOMENTS_EMPTY)
+        empty = QListWidgetItem(analysis_zh(_MOMENTS_EMPTY))
         empty.setFlags(Qt.NoItemFlags)          # not selectable: it is not a moment
         self.moments.addItem(empty)
 
@@ -635,10 +795,10 @@ class AnalysisView(QWidget):
         lay.setSpacing(16)
         if settings is not None:
             lay.addWidget(HintBar(settings, (
-                "The four numbers up top are this run; each chart's title is what "
-                "its data says. Click a notable moment to replay just that flick "
-                "(green is clean, red overshot) or <b>Whole run</b> for all of it. "
-                "Coach cards carry their sources — hover a source count.")))
+                "顶部四个数字概括当前这一局；每张图的标题会直接说明数据结论。点击"
+                "关键片段可单独回放该次甩枪（绿色表示干净，红色表示过冲），也可以点击"
+                "<b>整局回放</b>查看全部轨迹。训练建议中的结论均附带依据和来源，"
+                "悬停来源数量即可查看。")))
         lay.addLayout(head)
         lay.addWidget(self.kpi_strip)
         lay.addWidget(self.charts)
@@ -806,15 +966,14 @@ class AnalysisView(QWidget):
         # summary_text_for: this is the only headline on the page that was
         # persisted, so a saved report kept asserting whatever was true when
         # it was written.
-        head = summary_text_for(rep)
+        head = report_summary_zh(rep)
         if self._rederived:
             # Say it. A page that quietly disagrees with the JSON a user can
             # open in a text editor is worse than one that never corrected it:
             # the number changed, nothing on screen explains why, and the file
             # is still sitting there saying the old thing.
-            head += (f" These numbers are re-derived from the recording at the "
-                     f"current {MIN_FLICK_DEG:g}-degree flick floor — the saved "
-                     "report was written at a different one.")
+            head += (f" 这些数值已按当前 {MIN_FLICK_DEG:g}° 的甩枪阈值从轨迹重新计算；"
+                     "保存报告使用的是旧阈值。")
         self.summary.setText(head)
         self._draw_bias(rep)
         self._draw_heat(rep)
@@ -1023,8 +1182,8 @@ class AnalysisView(QWidget):
             card.setVisible(self._coach_open or i < _COACH_FOLD)
         if self.coach_more is not None:
             self.coach_more.setText(
-                "show fewer" if self._coach_open
-                else f"show all ({len(self._coach_cards)})")
+                "收起" if self._coach_open
+                else f"显示全部（{len(self._coach_cards)}）")
 
     def _toggle_coach(self) -> None:
         self._coach_open = not self._coach_open
@@ -1037,7 +1196,7 @@ class AnalysisView(QWidget):
         hist = profile.history if profile is not None else []
         accs = [float(h.get("accuracy", 0.0)) for h in hist[-60:]]
         if len(accs) >= 2:
-            self.trend_spark.set_title(_trend_title(accs))
+            self.trend_spark.set_title(analysis_zh(_trend_title(accs)))
             # first_run is the true 1-based run number of accs[0]. Without it
             # the widget can only say "oldest shown", because it cannot know
             # this list was sliced — on a 137-run profile it was labelling
@@ -1046,7 +1205,7 @@ class AnalysisView(QWidget):
                                       first_run=len(hist) - len(accs) + 1)
             self.trend_w.show()
         else:
-            self.trend_spark.set_title(_TREND_TITLE)
+            self.trend_spark.set_title(analysis_zh(_TREND_TITLE))
             self.trend_spark.clear()
             self.trend_w.hide()
 
@@ -1061,7 +1220,7 @@ class AnalysisView(QWidget):
         ns = [(b.get(d) or {}).get("n", 0) for d in dirs]
         degraded = input_degraded(rep)
         moving = (rep.player_frame or "") == "MOBILE"
-        self.bias_bars.set_title(_bias_title(vals, ns, degraded, moving))
+        self.bias_bars.set_title(analysis_zh(_bias_title(vals, ns, degraded, moving)))
         # ratio_counts is the caller's explicit permission for the chart to
         # spell out a side-vs-side ratio, and only this layer can grant it:
         # viz.py cannot reach input_degraded (it would have to import analysis
@@ -1083,7 +1242,7 @@ class AnalysisView(QWidget):
                                     ratio_counts=None if degraded else ns,
                                     floor=_BIAS_COST_FLOOR,
                                     compare=compare, worst=worst)
-        self.bias_caption.setText(_bias_caption(vals, ns, degraded, moving))
+        self.bias_caption.setText(analysis_zh(_bias_caption(vals, ns, degraded, moving)))
 
     def _draw_heat(self, rep: RunReport | None = None) -> None:
         """Zone heatmap on the Settings.region_cols x region_rows grid:
@@ -1093,22 +1252,22 @@ class AnalysisView(QWidget):
         rows = self._settings.region_rows if self._settings is not None else 5
         if rep is not None and rep.region_deficits:
             grid, labels = viz.region_grid(rep.region_deficits, cols, rows)
-            self.heat_map.set_title(
+            self.heat_map.set_title(analysis_zh(
                 _deficit_title(rep.region_deficits, self._settings,
-                               input_degraded(rep)))
+                               input_degraded(rep))))
             self.heat_map.set_data(grid, labels, fmt="{:+.2f}")
-            self.heat_caption.setText(_DEFICIT_CAPTION)
+            self.heat_caption.setText(analysis_zh(_DEFICIT_CAPTION))
         elif self.trace is not None and len(self.trace) >= 2:
             heat, _xe, _ye = movement_heatmap(self.trace)
             pooled = viz.pool(np.log1p(heat.T), rows, cols)  # heat.T row 0 = bottom
             labels = [[f"r{r}c{c}" for c in range(cols)] for r in range(rows)]
-            self.heat_map.set_title(_travel_title(heat))
+            self.heat_map.set_title(analysis_zh(_travel_title(heat)))
             self.heat_map.set_data(pooled, labels, fmt="{:.2f}")
-            self.heat_caption.setText(_TRAVEL_CAPTION)
+            self.heat_caption.setText(analysis_zh(_TRAVEL_CAPTION))
         else:
-            self.heat_map.set_title(_TRAVEL_TITLE)
+            self.heat_map.set_title(analysis_zh(_TRAVEL_TITLE))
             self.heat_map.set_data(None)
-            self.heat_caption.setText(_TRAVEL_CAPTION)
+            self.heat_caption.setText(analysis_zh(_TRAVEL_CAPTION))
 
     def _place_moments_placeholder(self) -> None:
         """The unselectable row that says what this list is for.
@@ -1119,7 +1278,7 @@ class AnalysisView(QWidget):
         panel. The placeholder belongs wherever the list ends up empty, not
         only in __init__.
         """
-        item = QListWidgetItem(_MOMENTS_EMPTY)
+        item = QListWidgetItem(analysis_zh(_MOMENTS_EMPTY))
         item.setFlags(Qt.NoItemFlags)
         self.moments.addItem(item)
 

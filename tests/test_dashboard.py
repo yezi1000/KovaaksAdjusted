@@ -114,7 +114,8 @@ def test_cold_start_dashes_every_hero_and_still_cites(qapp, settings):
     for key, card in dash.heroes.items():
         assert card.value.text() == "—", key
         assert card.word.text(), key                    # a state word regardless
-        assert card.because.text().startswith("because "), key
+        assert card.because.text().strip(), key
+        assert "because" not in card.because.text().lower(), key
         assert card.toolTip().strip(), key
     assert "0%" not in " ".join(c.value.text() for c in dash.heroes.values())
     dash.shutdown()
@@ -128,8 +129,8 @@ def test_hero_cards_never_render_a_value_without_a_because(qapp, settings):
     for key, card in dash.heroes.items():
         assert card.value.text().strip(), key
         assert card.value.text() != "—", key            # this profile has data
-        assert card.because.text().startswith("because "), key
-        assert len(card.because.text()) > len("because ") + 10, key
+        assert card.because.text().strip(), key
+        assert len(card.because.text()) > 10, key
     dash.shutdown()
     dash.deleteLater()
 
@@ -257,7 +258,7 @@ def test_a_report_drives_load_and_a_scenario_switch_clears_it(qapp, settings):
         summary_text="30 kills at 61% accuracy.")
     dash._on_report(rep)
     assert dash.heroes["load"].value.text() == "90%"
-    assert dash.heroes["load"].word.text() == "fatigued"
+    assert dash.heroes["load"].word.text() == "已疲劳"
 
     dash.scenario.setCurrentText("Lambda")        # different scenario entirely
     assert dash._fatigue == {}
@@ -415,7 +416,7 @@ def test_profile_json_round_trips_into_the_heroes(qapp, settings):
     assert json.loads(path.read_text())["run_count"] == 24
     dash = _dashboard(settings, "Upsilon")
     assert dash.heroes["readiness"].value.text() == "100%"
-    assert dash.heroes["readiness"].word.text() == "dialed in"
+    assert dash.heroes["readiness"].word.text() == "已就绪"
     dash.shutdown()
     dash.deleteLater()
 
@@ -437,11 +438,9 @@ def test_readiness_will_not_say_dialed_in_without_bias_evidence(qapp, settings):
     dash = _dashboard(settings, "Nu")
     hero = dash.heroes["readiness"]
     assert hero.value.text() == "85%", "the missing 15% is the bias component"
-    assert hero.word.text() != "dialed in"
+    assert hero.word.text() != "已就绪"
     because = hero.because.text().lower()
-    assert "bias evidence 0/8 measurements" in because, because
-    assert "run" not in because.split("bias evidence")[1][:24], (
-        "the bias clause must count measurements, not runs")
+    assert "方向偏差证据 0/8 次" in because, because
     dash.shutdown()
     dash.deleteLater()
 
