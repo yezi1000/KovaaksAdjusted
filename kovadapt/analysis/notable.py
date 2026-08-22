@@ -62,14 +62,15 @@ def find_notable_moments(
     # indistinguishable from a clean direct hit and could even be selected as
     # the positive benchmark below. Per-shot labels come only from one-hit
     # KovaaK's acquisitions; unknown outcomes are intentionally ignored.
-    raw_misses = [f for f in flicks if f.hit is False and f.corrections == 0]
+    raw_misses = [f for f in flicks
+                  if f.hit is False and f.phase_kind == "primary_only"]
     by_unconfirmed = sorted(
         raw_misses, key=lambda f: (f.overshoot, f.duration), reverse=True)
     denom = max(len(raw_misses), 1)
     for rank, f in enumerate(by_unconfirmed[:top_k]):
         add(f, "unconfirmed_miss", 1.0 - rank / (denom + 1),
-            f"Missed a {_fmt_dir(f)} flick without a corrective submovement "
-            "before firing.")
+            f"Missed a {_fmt_dir(f)} flick with no detected terminal-control "
+            "phase before firing.")
 
     # Slowest flicks for their size (duration normalized by sqrt amplitude ~ Fitts)
     if len(flicks) >= 5:

@@ -179,7 +179,7 @@ class AdaptationEngine:
         recovery next session resumes from the true difficulty.
 
         `click_phases` is the outcome-linked static-click digest. A high share
-        of misses fired without a corrective submovement blocks the optional
+        of misses fired without a detected terminal-control phase blocks the optional
         Fitts shrink step: making the target smaller while the player is
         skipping the homing/confirmation phase rewards the wrong bottleneck.
 

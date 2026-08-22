@@ -688,14 +688,15 @@ DIAGNOSTICS: dict[str, dict] = {
         "signal": "one-shot outcome + corrective-submovement count",
         "condition": (
             "archetype == clicking AND at least 8 clicks are matched to one-hit targets AND "
-            "at least 2 misses occurred AND >= 50% of misses were fired without a detectable "
-            "corrective submovement (numeric cutoffs are editorial calibration)"
+            "at least 2 misses occurred AND >= 50% of misses were fired without a detected "
+            "smooth-terminal or discrete corrective phase (numeric cutoffs are editorial calibration)"
         ),
         "interpretation": (
-            "The primary movement ended in a shot that KovaaK's marked as a miss, without the "
-            "optional homing correction expected when the initial landing is not trustworthy. "
-            "This is different from a clean direct hit: outcome linking prevents the same "
-            "zero-correction trace shape from being praised merely because it looked smooth."
+            "The primary movement ended in a shot that KovaaK's marked as a miss, without a "
+            "detected smooth-terminal or discrete homing phase. This is different from a clean "
+            "primary-only hit: outcome linking prevents the same single-peak trace shape from "
+            "being praised merely because it looked smooth. Raw Input still cannot prove that "
+            "a target-centre video would reveal no tiny visual correction."
         ),
         "prescription": (
             "Use a fast but controlled primary movement, decelerate as the crosshair approaches, "

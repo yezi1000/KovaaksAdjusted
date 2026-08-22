@@ -277,6 +277,46 @@ def test_static_click_phase_speed_slowdown_and_direct_hits():
     assert 0 < phases["mean_transition_slowdown"] < 1
 
 
+def test_continuous_terminal_turn_is_not_called_primary_only():
+    """A smooth correction can change direction during deceleration without
+    producing the old <15% then >35% second speed peak. That is terminal
+    control, not evidence that no adjustment happened."""
+    n = 180
+    u = np.linspace(0.0, 1.0, n)
+    speed = np.sin(np.pi * u)
+    # Straight fast transport, then a smooth 16-degree terminal turn while
+    # speed keeps falling monotonically after its peak.
+    angle = np.deg2rad(16.0) * np.clip((u - 0.62) / 0.38, 0.0, 1.0)
+    wx, wy = speed * np.cos(angle), speed * np.sin(angle)
+    scale = 600.0 / wx.sum()
+    cx = np.round(np.cumsum(wx * scale))
+    cy = np.round(np.cumsum(wy * scale))
+    dx = np.diff(np.concatenate([[0.0], cx])).astype(np.int32)
+    dy = np.diff(np.concatenate([[0.0], cy])).astype(np.int32)
+    t = 1000.0 + np.arange(1, n + 1) / RATE
+    trace = MouseTrace(
+        t=t, dx=dx, dy=dy,
+        clicks=np.array([t[-1] + 0.005]),
+        clicks_up=np.array([t[-1] + 0.065]),
+    )
+
+    flick = segment_flicks(trace)[0]
+    assert flick.corrections == 0, "fixture accidentally made a discrete bump"
+    assert flick.phase_kind == "smooth_terminal"
+    assert flick.micro_adjust_speed > 0
+    flick.hit = True
+    phases = click_phase_metrics([flick])
+    assert phases["primary_only_hits"] == 0
+    assert phases["smooth_terminal_hits"] == 1
+    assert phases["direct_hits"] == 0       # legacy alias is conservative too
+
+    flick.hit = False
+    missed = click_phase_metrics([flick])
+    assert missed["uncorrected_misses"] == 0
+    assert missed["corrected_misses"] == 1, (
+        "smooth terminal control was still treated as firing with no adjustment")
+
+
 # ----------------------------------------------------------------- run report
 def test_a_report_records_the_flick_floor_it_was_measured_at(fixtures, tmp_path):
     """Reports are this app's long-lived evidence — the Changes ledger pools

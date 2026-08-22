@@ -392,7 +392,7 @@ def test_analysis_view_captions_toggles_and_clip_story(qapp, settings):
 
     # replay layer toggles flip visibility of the existing plot items
     r = view.replay
-    for box, items in ((r.toggle_path, (r._full,)),
+    for box, items in ((r.toggle_path, (r._full, *r._speed_curves)),
                        (r.toggle_flicks, (r._good, r._bad)),
                        (r.toggle_shots, (r._shots,))):
         assert box.isChecked()           # all layers default ON

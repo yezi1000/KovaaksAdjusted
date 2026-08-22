@@ -125,7 +125,8 @@ def test_numbers_lead_charts_follow_coach_lands_last(qapp, settings):
 def test_static_click_phase_metrics_are_visible_and_explicit(qapp, settings):
     phases = {
         "labeled": 12, "hits": 10, "misses": 2,
-        "direct_hits": 7, "direct_hit_rate": 0.7,
+        "primary_only_hits": 7, "primary_only_hit_rate": 0.7,
+        "smooth_terminal_hits": 1, "discrete_adjust_hits": 2,
         "mean_peak_speed_counts_s": 5000.0,
         "mean_primary_speed_counts_s": 3000.0,
         "transition_samples": 3,
@@ -922,6 +923,26 @@ def test_the_replay_transport_is_dead_until_there_is_something_to_replay(
     view.deleteLater()
 
 
+def test_replay_path_is_colored_by_instantaneous_speed(qapp, settings):
+    slow_fast = (TraceBuilder(t0=1000.0)
+                 .flick(240, 0, dur=0.30)
+                 .flick(-240, 0, dur=0.08).build())
+    view = AnalysisView(settings)
+    view.show_report(
+        _report(n_flicks=2, deg_per_count=0.01), trace=slow_fast,
+        profile=_profile(archetype="clicking"))
+
+    populated = 0
+    for curve in view.replay._speed_curves:
+        x, _y = curve.getData()
+        populated += int(x is not None and len(x) > 0)
+    assert populated >= 3, "speed range collapsed into one painted colour"
+    assert "速度：慢" in view.replay.legend.text()
+    assert "快" in view.replay.legend.text()
+    assert "°/秒" in view.replay.legend.text()
+    view.deleteLater()
+
+
 def test_no_view_widens_a_splitter_handle_past_what_the_theme_asked_for(qapp, settings):
     """`setHandleWidth(14)` for "room to breathe" did not add space — the theme
     FILLS a splitter handle with `pal.border`, so widening it produced a 14px
@@ -1180,7 +1201,8 @@ def test_saved_outcome_report_backfills_new_phase_metrics(qapp, settings):
     outcomes = [{"t_click": float(t), "hit": True} for t in trace.clicks]
     stale = _report(
         n_flicks=2, shot_outcomes=outcomes,
-        click_phases={"labeled": 2, "hits": 2, "direct_hits": 1})
+        click_phases={"labeled": 2, "hits": 2, "direct_hits": 1,
+                      "mean_peak_speed_counts_s": 1234.0})
 
     view = AnalysisView(settings)
     view.show_report(stale, trace=trace, profile=_profile(archetype="clicking"))

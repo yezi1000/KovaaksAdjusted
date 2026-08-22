@@ -50,6 +50,11 @@ class Flick:
     micro_adjust_speed: float = 0.0
     brake_ms: float = 0.0
     transition_slowdown: float = 0.0
+    # primary_only | smooth_terminal | discrete_adjust | repair_chain.
+    # "primary_only" means no secondary kinematic phase was detected; it
+    # deliberately does not claim that target-centre video would reveal no
+    # tiny visual correction.
+    phase_kind: str = "primary_only"
 
     @property
     def horizontal(self) -> str:
@@ -182,7 +187,7 @@ def segment_flicks(
         post = speed[ipk:ic]
         corrections = 0
         primary_end = ic
-        micro_start: int | None = None
+        phase_kind = "primary_only"
         if post.size >= 3:
             m = np.where(post < 0.15 * pk, -1, np.where(post > 0.35 * pk, 1, 0))
             nz = np.flatnonzero(m)
@@ -194,14 +199,67 @@ def segment_flicks(
                 if transitions.size:
                     first = int(transitions[0])
                     primary_end = ipk + int(nz[first])
-                    micro_start = ipk + int(nz[first + 1])
+                    phase_kind = ("repair_chain" if corrections >= 2
+                                  else "discrete_adjust")
+
+        # A secondary phase need not fall below 15% of peak and then produce
+        # a separate speed peak.  Smooth terminal control can appear as a
+        # shallower re-acceleration or a direction change while the movement
+        # keeps decelerating.  Detect both, but only after peak speed and only
+        # when the terminal displacement is large enough to survive integer
+        # mouse-count noise.  This is a kinematic phase label, not a claim
+        # about target-centre error (Raw Input has no target pixels).
+        if phase_kind == "primary_only" and post.size >= 6:
+            smooth_rel: int | None = None
+
+            # Type-2-like secondary submovement: the deceleration turns back
+            # into acceleration without reaching the stronger 15/35% valley
+            # used by the discrete-correction counter.
+            ds = np.diff(post)
+            troughs = np.flatnonzero((ds[:-1] < 0) & (ds[1:] > 0)) + 1
+            for trough in troughs:
+                level = float(post[trough] / pk)
+                rebound = (float(np.max(post[trough + 1:]) - post[trough])
+                           if trough + 1 < post.size else 0.0)
+                if 0.15 <= level <= 0.65 and rebound >= 0.06 * pk:
+                    smooth_rel = int(trough)
+                    break
+
+            # Curved terminal homing: compare the velocity around peak with
+            # the displacement of the low-speed tail. Seven degrees is above
+            # the angular quantisation of a >=5-count tail while remaining
+            # sensitive to the narrow wrist/finger adjustment static clicking
+            # is meant to expose.
+            below_tail = np.flatnonzero(post <= 0.35 * pk)
+            tail_rel = int(below_tail[0]) if below_tail.size else -1
+            if tail_rel >= 0 and ipk + tail_rel < ic:
+                tail_i = ipk + tail_rel
+                tail_dx = x[ic] - x[tail_i]
+                tail_dy = y[ic] - y[tail_i]
+                tail_amp = float(np.hypot(tail_dx, tail_dy))
+                p0, p1 = max(ipk - 2, ion), min(ipk + 3, ic)
+                pvx = float(np.mean(vxs[p0:p1]))
+                pvy = float(np.mean(vys[p0:p1]))
+                pnorm = float(np.hypot(pvx, pvy))
+                if tail_amp >= max(5.0, 0.03 * amplitude) and pnorm > 0:
+                    cosine = np.clip(
+                        (pvx * tail_dx + pvy * tail_dy) / (pnorm * tail_amp),
+                        -1.0, 1.0)
+                    turn_deg = float(np.degrees(np.arccos(cosine)))
+                    if turn_deg >= 10.0:
+                        smooth_rel = (tail_rel if smooth_rel is None
+                                      else min(smooth_rel, tail_rel))
+
+            if smooth_rel is not None:
+                primary_end = ipk + smooth_rel
+                phase_kind = "smooth_terminal"
 
         primary_slice = speed[ion:max(primary_end + 1, ion + 1)]
         primary_mean = float(np.mean(primary_slice)) if primary_slice.size else 0.0
         micro_mean = 0.0
         brake_ms = 0.0
         slowdown = 0.0
-        if micro_start is not None and primary_mean > 0:
+        if phase_kind != "primary_only" and primary_mean > 0:
             # Include the valley in the adjustment phase: the controlled
             # deceleration is part of the transition, not dead time to hide.
             adjust = speed[primary_end:ic]
@@ -224,6 +282,7 @@ def segment_flicks(
                 micro_adjust_speed=micro_mean,
                 brake_ms=brake_ms,
                 transition_slowdown=slowdown,
+                phase_kind=phase_kind,
             )
         )
     return flicks
@@ -304,13 +363,14 @@ def click_phase_metrics(flicks: list[Flick]) -> dict:
         return {}
     hits = [f for f in labeled if f.hit]
     misses = [f for f in labeled if not f.hit]
-    direct_hits = sum(f.corrections == 0 for f in hits)
-    corrected_hits = sum(f.corrections == 1 for f in hits)
-    repair_hits = sum(f.corrections >= 2 for f in hits)
-    uncorrected_misses = sum(f.corrections == 0 for f in misses)
+    primary_hits = sum(f.phase_kind == "primary_only" for f in hits)
+    smooth_hits = sum(f.phase_kind == "smooth_terminal" for f in hits)
+    discrete_hits = sum(f.phase_kind == "discrete_adjust" for f in hits)
+    repair_hits = sum(f.phase_kind == "repair_chain" for f in hits)
+    uncorrected_misses = sum(f.phase_kind == "primary_only" for f in misses)
     corrected_misses = len(misses) - uncorrected_misses
     transitions = [f for f in labeled
-                   if f.corrections > 0 and f.primary_mean_speed > 0
+                   if f.phase_kind != "primary_only" and f.primary_mean_speed > 0
                    and f.micro_adjust_speed > 0]
     primary_speeds = [f.primary_mean_speed for f in labeled
                       if f.primary_mean_speed > 0]
@@ -319,9 +379,16 @@ def click_phase_metrics(flicks: list[Flick]) -> dict:
         "hits": len(hits),
         "misses": len(misses),
         "linked_hit_rate": len(hits) / len(labeled),
-        "direct_hits": direct_hits,
-        "direct_hit_rate": direct_hits / len(hits) if hits else 0.0,
-        "corrected_hits": corrected_hits,
+        # Backward-compatible aliases: old reports/UI called primary-only
+        # hits "direct" and all one-phase corrections "corrected". New code
+        # reads the explicit four-way fields below.
+        "direct_hits": primary_hits,
+        "direct_hit_rate": primary_hits / len(hits) if hits else 0.0,
+        "corrected_hits": smooth_hits + discrete_hits,
+        "primary_only_hits": primary_hits,
+        "primary_only_hit_rate": primary_hits / len(hits) if hits else 0.0,
+        "smooth_terminal_hits": smooth_hits,
+        "discrete_adjust_hits": discrete_hits,
         "repair_chain_hits": repair_hits,
         "uncorrected_misses": uncorrected_misses,
         "corrected_misses": corrected_misses,

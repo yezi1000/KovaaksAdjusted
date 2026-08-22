@@ -2,9 +2,9 @@
 
 Visual language (all derived from the recorded MouseTrace — no video):
 
-    faint grey line   full crosshair path of the window (deliberately subtle)
-    green segments    clean flicks (low overshoot, <= 1 correction)
-    red segments      flawed flicks (overshoot > 10% or >= 2 corrections)
+    blue→orange line  instantaneous mouse speed, slow→fast
+    green halo        clean flicks (low overshoot, <= 1 correction)
+    red halo          flawed flicks (overshoot > 10% or >= 2 corrections)
     red ✕             shots (left clicks)
     bright dot+trail  playhead sweeping in (scaled) real time
 
@@ -22,6 +22,7 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QElapsedTimer, Qt, QTimer
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
@@ -43,6 +44,13 @@ _SLIDER_STEPS = 1000
 # 0.1, notable "clean" uses <= 1 correction).
 _FLAWED_OVERSHOOT = 0.10
 _FLAWED_CORRECTIONS = 2
+_SPEED_BANDS = 6
+# Sequential and colour-blind-friendly enough for a quantitative layer; red
+# and green remain reserved for the quality halo around this line.
+_SPEED_COLORS_DARK = (
+    "#6272FF", "#3B9EFF", "#25C4C8", "#55D68B", "#D4D64B", "#FFB347")
+_SPEED_COLORS_LIGHT = (
+    "#3546B0", "#1769AA", "#007C83", "#2D8245", "#827D00", "#B65B00")
 
 
 class TrajectoryReplay(QWidget):
@@ -51,6 +59,9 @@ class TrajectoryReplay(QWidget):
         self._t = np.empty(0)
         self._x = np.empty(0)
         self._y = np.empty(0)
+        self._point_speed = np.empty(0)
+        self._speed_bounds = (0.0, 0.0)
+        self._deg_per_count = 0.0
         self._pos = 0.0          # playhead (s from segment start)
         self._speed = 0.5        # default half speed: flicks are fast
         self._clock = QElapsedTimer()
@@ -65,6 +76,8 @@ class TrajectoryReplay(QWidget):
         self.plot.setMenuEnabled(False)
         self.plot.hideButtons()
         self._full = self.plot.plot([], [])
+        self._speed_curves = [self.plot.plot([], [], connect="finite")
+                              for _ in range(_SPEED_BANDS)]
         self._good = self.plot.plot([], [], connect="finite")
         self._bad = self.plot.plot([], [], connect="finite")
         self._live = self.plot.plot([], [])
@@ -72,6 +85,14 @@ class TrajectoryReplay(QWidget):
         self._shots = pg.ScatterPlotItem(size=14, brush=None, symbol="x")
         self.plot.addItem(self._head)
         self.plot.addItem(self._shots)
+        self._full.setZValue(0)
+        self._good.setZValue(1)
+        self._bad.setZValue(1)
+        for curve in self._speed_curves:
+            curve.setZValue(2)
+        self._live.setZValue(3)
+        self._head.setZValue(4)
+        self._shots.setZValue(4)
 
         self.btn = QPushButton(tr("Replay"))
         self.btn.clicked.connect(self.toggle)
@@ -87,7 +108,7 @@ class TrajectoryReplay(QWidget):
         self.toggle_shots.setToolTip("以 ✕ 标出每次射击的位置")
         for box in (self.toggle_path, self.toggle_flicks, self.toggle_shots):
             box.setChecked(True)
-        self.toggle_path.toggled.connect(self._full.setVisible)
+        self.toggle_path.toggled.connect(self._set_path_visible)
         self.toggle_flicks.toggled.connect(self._set_flicks_visible)
         self.toggle_shots.toggled.connect(self._shots.setVisible)
         self.scrub = QSlider(Qt.Horizontal)
@@ -131,14 +152,55 @@ class TrajectoryReplay(QWidget):
         full_pen = pg.mkColor(pal.fg_dim)
         full_pen.setAlphaF(0.4)
         self._full.setPen(pg.mkPen(full_pen, width=1))
-        self._good.setPen(pg.mkPen(pal.good, width=2))
-        self._bad.setPen(pg.mkPen(pal.bad, width=2))
+        good = pg.mkColor(pal.good)
+        bad = pg.mkColor(pal.bad)
+        good.setAlphaF(0.35)
+        bad.setAlphaF(0.35)
+        # Quality is a wide translucent halo; the quantitative speed colour
+        # stays visible as the narrower line above it.
+        self._good.setPen(pg.mkPen(good, width=6))
+        self._bad.setPen(pg.mkPen(bad, width=6))
+        colors = (_SPEED_COLORS_DARK if pal.is_dark else _SPEED_COLORS_LIGHT)
+        for curve, color in zip(self._speed_curves, colors):
+            curve.setPen(pg.mkPen(QColor(color), width=2.5))
         self._live.setPen(pg.mkPen(pal.accent, width=2))
-        self._head.setBrush(pg.mkBrush(pal.accent))
+        current_speed = (float(self._point_speed[min(
+            max(int(np.searchsorted(self._t, self._pos)) - 1, 0),
+            self._point_speed.size - 1)]) if self._point_speed.size else 0.0)
+        self._head.setBrush(pg.mkBrush(
+            self._color_for_speed(current_speed) if self._point_speed.size
+            else QColor(pal.accent)))
         self._shots.setPen(pg.mkPen(pal.bad, width=2))
+        self._update_legend()
+
+    def _color_for_speed(self, value: float) -> QColor:
+        """Palette-aware speed-band colour for the playhead."""
+        colors = (_SPEED_COLORS_DARK if theme.current().is_dark
+                  else _SPEED_COLORS_LIGHT)
+        lo, hi = self._speed_bounds
+        if hi <= lo:
+            return QColor(colors[0])
+        norm = float(np.clip((value - lo) / (hi - lo), 0.0, 1.0))
+        band = min(int(norm * _SPEED_BANDS), _SPEED_BANDS - 1)
+        return QColor(colors[band])
+
+    def _update_legend(self) -> None:
+        pal = theme.current()
+        colors = (_SPEED_COLORS_DARK if pal.is_dark else _SPEED_COLORS_LIGHT)
+        lo, hi = self._speed_bounds
+        if self._deg_per_count > 0 and hi > 0:
+            bounds = (f"{lo * self._deg_per_count:.0f}–"
+                      f"{hi * self._deg_per_count:.0f}°/秒")
+        elif hi > 0:
+            bounds = f"{lo:.0f}–{hi:.0f} 计数/秒"
+        else:
+            bounds = "按当前窗口自动缩放"
+        ramp = "".join(
+            f"<span style='color:{c}'>━</span>" for c in colors)
         self.legend.setText(
-            f"<span style='color:{pal.good}'>—</span> 干净甩枪&nbsp;&nbsp;"
-            f"<span style='color:{pal.bad}'>—</span> 过冲或修正&nbsp;&nbsp;"
+            f"速度：慢 {ramp} 快（{bounds}）&nbsp;&nbsp;"
+            f"<span style='color:{pal.good}'>▬</span> 干净甩枪外框&nbsp;&nbsp;"
+            f"<span style='color:{pal.bad}'>▬</span> 问题甩枪外框&nbsp;&nbsp;"
             f"<span style='color:{pal.bad}'>✕</span> 射击点")
 
     # ------------------------------------------------------------------
@@ -147,33 +209,66 @@ class TrajectoryReplay(QWidget):
         self._good.setVisible(on)
         self._bad.setVisible(on)
 
+    def _set_path_visible(self, on: bool) -> None:
+        self._full.setVisible(on)
+        for curve in self._speed_curves:
+            curve.setVisible(on)
+
     # ------------------------------------------------------------------
     def load(self, trace: MouseTrace, t0: float | None = None,
              t1: float | None = None, label: str = "",
-             flicks: list | None = None) -> None:
+             flicks: list | None = None,
+             deg_per_count: float = 0.0) -> None:
         """Show [t0, t1] of the trace (defaults: whole trace). `flicks` are
         analysis.movement.Flick objects for the SAME trace (absolute epoch
         times); the ones inside the window become quality overlays."""
         self.stop()
         seg = trace if t0 is None else trace.window(t0, t1 if t1 is not None else trace.t[-1])
-        t, x, y = seg.path()
+        # A uniform grid represents rest as zero speed. Raw packet timestamps
+        # contain no samples while the hand is still, so differentiating the
+        # raw path would assign the entire rest gap to the first moving packet
+        # and paint a fast launch as artificially slow.
+        t, vx, vy = seg.resample(500.0)
+        if t.size >= 2:
+            x = np.cumsum(vx, dtype=np.float64) / 500.0
+            y = -np.cumsum(vy, dtype=np.float64) / 500.0
+            point_speed = np.hypot(vx, vy)
+        else:
+            t, x, y = seg.path()
+            dt = np.diff(t, prepend=t[0] if t.size else 0.0)
+            distance = np.hypot(np.diff(x, prepend=0.0),
+                                np.diff(y, prepend=0.0))
+            point_speed = np.divide(
+                distance, dt, out=np.zeros_like(distance), where=dt > 0)
         if t.size < 2:
             self._t = np.empty(0)
-            for item in (self._full, self._good, self._bad, self._live):
+            self._point_speed = np.empty(0)
+            self._speed_bounds = (0.0, 0.0)
+            self._deg_per_count = max(float(deg_per_count or 0.0), 0.0)
+            for item in (self._full, self._good, self._bad, self._live,
+                         *self._speed_curves):
                 item.setData([], [])
             self._head.setData([], [])
             self._shots.setData([], [])
             self.info.setText("此时间窗口内没有鼠标移动")
+            self._update_legend()
+            self._sync_transport()
             return
         # decimate for drawing: replay is an indicator, not a data export
         stride = max(1, t.size // _MAX_POINTS)
         t, x, y = t[::stride], x[::stride], y[::stride]
+        point_speed = point_speed[::stride]
         base = t[0]
         self._t = t - base
         self._x, self._y = x, y
+        self._point_speed = point_speed
+        self._deg_per_count = max(float(deg_per_count or 0.0), 0.0)
         self._full.setData(x, y)
+        self._draw_speed_path()
         self._live.setData([], [])
         self._head.setData([x[0]], [y[0]])
+        self._head.setBrush(pg.mkBrush(self._color_for_speed(
+            float(point_speed[0]) if point_speed.size else 0.0)))
         clicks = seg.clicks - base
         ci = np.clip(np.searchsorted(self._t, clicks), 0, t.size - 1)
         self._shots.setData(x[ci], y[ci])
@@ -183,6 +278,36 @@ class TrajectoryReplay(QWidget):
         self.info.setText(label or f"{self._t[-1]:.2f} 秒 · {seg.clicks.size} 次射击")
         self.plot.autoRange()
         self._sync_transport()
+
+    def _draw_speed_path(self) -> None:
+        """Six NaN-separated curves, quantised by robust window speed."""
+        for curve in self._speed_curves:
+            curve.setData([], [])
+        if self._t.size < 2 or self._point_speed.size != self._t.size:
+            self._speed_bounds = (0.0, 0.0)
+            self._update_legend()
+            return
+        moving = self._point_speed[self._point_speed > 0]
+        if not moving.size:
+            self._speed_bounds = (0.0, 0.0)
+            self._update_legend()
+            return
+        lo, hi = np.percentile(moving, [10, 95])
+        lo, hi = float(lo), float(hi)
+        if hi <= lo:
+            hi = lo + 1.0
+        self._speed_bounds = (lo, hi)
+        segment_speed = 0.5 * (self._point_speed[:-1] + self._point_speed[1:])
+        norm = np.clip((segment_speed - lo) / (hi - lo), 0.0, 1.0)
+        bands = np.minimum((norm * _SPEED_BANDS).astype(int), _SPEED_BANDS - 1)
+        for band, curve in enumerate(self._speed_curves):
+            xs: list[float] = []
+            ys: list[float] = []
+            for i in np.flatnonzero(bands == band):
+                xs.extend((float(self._x[i]), float(self._x[i + 1]), np.nan))
+                ys.extend((float(self._y[i]), float(self._y[i + 1]), np.nan))
+            curve.setData(xs, ys)
+        self._update_legend()
 
     def _draw_flicks(self, base: float, flicks: list) -> None:
         """Two NaN-separated polylines: clean (green) and flawed (red)."""
@@ -211,12 +336,16 @@ class TrajectoryReplay(QWidget):
         the previous run's path can't masquerade as the current one)."""
         self.stop()
         self._t = np.empty(0)
-        for item in (self._full, self._good, self._bad, self._live):
+        self._point_speed = np.empty(0)
+        self._speed_bounds = (0.0, 0.0)
+        for item in (self._full, self._good, self._bad, self._live,
+                     *self._speed_curves):
             item.setData([], [])
         self._head.setData([], [])
         self._shots.setData([], [])
         self.scrub.setValue(0)
         self.info.setText(message)
+        self._update_legend()
         self._sync_transport()
 
     def _sync_transport(self) -> None:
@@ -288,3 +417,5 @@ class TrajectoryReplay(QWidget):
         j = int(np.searchsorted(self._t, self._t[i - 1] - _TRAIL_SECONDS))
         self._live.setData(self._x[j:i], self._y[j:i])
         self._head.setData([self._x[i - 1]], [self._y[i - 1]])
+        self._head.setBrush(pg.mkBrush(
+            self._color_for_speed(float(self._point_speed[i - 1]))))

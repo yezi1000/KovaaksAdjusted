@@ -436,19 +436,21 @@ _GOVERNOR = (
 _FLICK = (
     "Static clicking is read as a sequence, not one accuracy number. For one-hit targets, "
     "kovadapt matches KovaaK's per-target shot count and kill time to the Raw Input click "
-    "stream, then classifies the linked attempts as a direct hit, a one-correction hit, a "
-    "multi-correction repair, or a miss fired without a detectable corrective submovement. "
+    "stream, then classifies the linked attempts as a primary-only hit, smooth-terminal "
+    "control, a discrete adjustment, a repair chain, or a miss without a detected terminal "
+    "phase. "
     "The standard motor-control decomposition splits aiming into a primary ballistic phase "
     "followed, when needed, by corrective submovements; the training policy therefore asks "
     "for a clean acquisition, one deliberate correction when the landing is not confirmed, "
     "and speed only after accuracy is stable. Known misses also count against their spatial "
-    "region, so a zero-correction miss is never praised as a clean flick. The boundary is "
+    "region, so a primary-only miss is never praised as a clean flick. The boundary is "
     "explicit: Raw Input has no target-centre pixels, so kovadapt can prove whether a linked "
-    "shot hit and whether correction occurred, but not the exact pixel error at landing. "
-    "The review also reports acquisition peak and phase-average speed. The same 15/35-percent "
-    "speed hysteresis used to count corrections marks the transition into micro-adjustment, "
-    "so braking time, adjustment speed, and the phase speed drop share one definition. Hits "
-    "with no detected correction are counted separately as successful direct acquisitions."
+    "shot hit and whether a secondary kinematic phase occurred, but not the exact pixel error "
+    "at landing. The review reports acquisition peak and phase-average speed. A strong "
+    "15/35-percent speed hysteresis identifies discrete adjustments; shallower re-acceleration "
+    "and terminal direction change identify smooth terminal control. A single-peak hit is "
+    "therefore named primary-only, never presented as proof that video would show no tiny "
+    "visual correction."
 )
 
 _BANDIT = (
@@ -552,15 +554,15 @@ _GOVERNOR_ZH = (
 )
 _FLICK_ZH = (
     "静态点击不能只看总准确率，而要看每次动作的过程。对一击死亡的目标，kovadapt 会把 KovaaK's "
-    "记录的逐目标开枪数和击杀时间，与原始输入中的点击对应起来，再区分为：一次定位直接命中、"
-    "一次微调后命中、多次补救后命中，以及没有做出可检测微调就点空。运动控制中的瞄准动作通常"
+    "记录的逐目标开枪数和击杀时间，与原始输入中的点击对应起来，再区分为：单峰主移动命中、"
+    "平滑末端控制后命中、独立微调后命中、多次补救后命中，以及未检测到末端控制就点空。运动控制中的瞄准动作通常"
     "包含主要的快速移动，以及在需要时完成确认的修正子动作；因此训练顺序改为先做干净的一次定位，"
     "落点不确定时只做一次有意识微调，准确率稳定后再提高速度。已确认的点空也会计入对应区域的弱项，"
     "不会再被误夸成“干净甩枪”。能力边界同样明确：原始输入不包含目标中心像素，所以系统能判断"
-    "对应点击是否命中、是否发生微调，但不能声称准星落点距离目标中心多少像素。复盘页还会统计"
-    "快速定位的峰值与阶段平均速度；当轨迹从峰值降到 15% 以下、随后重新超过 35% 时，系统沿用"
-    "修正计数的同一滞回规则，把它识别为进入微调，并报告制动耗时、微调速度和阶段速度下降比例。"
-    "没有检测到微调仍然命中的点击会单独计数，它代表一次定位成功，而不是需要改正的错误。"
+    "对应点击是否命中、是否出现次级运动学阶段，但不能声称准星落点距离目标中心多少像素。复盘页"
+    "会统计快速定位的峰值与阶段平均速度。速度从峰值降到 15% 以下、随后重新超过 35% 时记为"
+    "独立微调；较浅的二次加速或末端方向偏转则记为平滑末端控制。只有没有这些可靠次级特征的命中"
+    "才叫单峰主移动命中，这个名称不再声称视频中绝对没有细小修正。"
 )
 _BANDIT_ZH = (
     "弱项具有空间位置。每次甩枪会被映射到墙面上的 5×5 网格：方向决定方位，幅度决定离中心的"
@@ -573,8 +575,8 @@ _FITTS_ZH = (
     "MT = a + b·ID，其中 ID = log<sub>2</sub>(D/W + 1)。目标越小、距离越远，动作所需时间越长；"
     "斜率 b 表示每增加一比特难度所付出的毫秒数。kovadapt 在每局内拟合这一斜率，并观察跨局变化。"
     "即使总分持平，只要毫秒/比特持续下降，也表示真实的运动效率提升；当准确率舒适但吞吐量停止"
-    "改善时，控制器会额外小幅缩小目标。若对应到原始输入的证据表明，大多数失误都是没有微调就"
-    "直接点空，这个额外缩小步骤会暂停：先恢复落点确认习惯，再用更小目标追求速度。"
+    "改善时，控制器会额外小幅缩小目标。若对应到原始输入的证据表明，大多数失误都没有检测到"
+    "平滑或独立的末端控制阶段，这个额外缩小步骤会暂停：先恢复落点确认习惯，再用更小目标追求速度。"
 )
 _MOVEMENT_ZH = (
     "固定不变的训练容易让人记住节奏。目标微移动由 Ornstein–Uhlenbeck 均值回归随机过程驱动："

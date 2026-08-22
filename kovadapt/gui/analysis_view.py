@@ -241,11 +241,14 @@ def report_summary_zh(rep: RunReport) -> str:
     labeled = int(phases.get("labeled", 0) or 0)
     misses = int(phases.get("misses", 0) or 0)
     raw_misses = int(phases.get("uncorrected_misses", 0) or 0)
-    direct = int(phases.get("direct_hits", 0) or 0)
+    primary = int(phases.get(
+        "primary_only_hits", phases.get("direct_hits", 0)) or 0)
+    smooth = int(phases.get("smooth_terminal_hits", 0) or 0)
     if labeled:
         lines.append(
             f"已把 {labeled} 次点击与逐目标结果对齐；其中 {misses} 次未命中，"
-            f"{direct} 次没有微调且直接命中，{raw_misses} 次没有微调且未命中。")
+            f"{primary} 次为单峰直接定位命中，{smooth} 次经过平滑末端控制后命中，"
+            f"{raw_misses} 次未检测到末端控制且未命中。")
     return " ".join(lines)
 
 
@@ -272,8 +275,8 @@ def moment_text_zh(moment: dict) -> str:
          lambda m: (f"参考动作：一次干净的 {m.group(1)} 计数"
                     f"{dirs.get(m.group(2), m.group(2))}甩枪，耗时 {m.group(3)} 毫秒，"
                     "没有过冲；可将它作为本局基准。")),
-        (r"Missed a ([a-z-]+) flick without a corrective submovement before firing\.",
-         lambda m: (f"一次{dirs.get(m.group(1), m.group(1))}甩枪在没有进行修正动作时"
+        (r"Missed a ([a-z-]+) flick with no detected terminal-control phase before firing\.",
+         lambda m: (f"一次{dirs.get(m.group(1), m.group(1))}甩枪在没有检测到末端控制阶段时"
                     "直接击发并未命中。")),
     )
     for pattern, render in patterns:
@@ -283,7 +286,7 @@ def moment_text_zh(moment: dict) -> str:
     kinds = {
         "overshoot": "过冲片段", "hesitation": "犹豫与连续修正片段",
         "slow_flick": "较慢甩枪片段", "clean_flick": "干净甩枪参考片段",
-        "unconfirmed_miss": "无修正直接点空片段",
+        "unconfirmed_miss": "未检测到末端控制的点空片段",
     }
     # Older reports may contain free-form sentences that predate the known
     # templates.  Preserve those details instead of replacing them with only
@@ -343,9 +346,9 @@ def localized_insight(ins: Insight) -> tuple[str, str, str, str, str]:
             "甩枪经常越过目标，随后又通过连续小动作回拉，说明主要问题更接近制动与控制。",
             "练习一次甩枪后只做一次小幅修正，减少反复拉扯。"),
         "dx-static-unconfirmed-miss": (
-            "需要修正时却直接击发",
-            "逐目标结果表明，多次未命中发生在首次甩枪之后、尚未检测到修正动作之前；"
-            "这与一次到位的直接命中不同。",
+            "未检测到末端控制就发生点空",
+            "逐目标结果表明，多次未命中发生在只检测到单峰主移动、尚未出现平滑末端控制或独立"
+            "修正动作时；这与单峰直接命中分开统计。",
             "先做快速但可控的首次定位，接近目标时减速；不确定时完成一次小幅修正并确认后再点击，"
             "稳定命中后再逐步提高节奏。"),
         "dx-overshoot-strategic": (
@@ -764,7 +767,7 @@ class AnalysisView(QWidget):
         self.phase_kpis: dict[str, _KpiTile] = {}
         for key, cap in (("acquire", "快速定位速度"),
                          ("slowdown", "定位→微调减速"),
-                         ("direct", "无微调直接命中")):
+                         ("direct", "单峰直接定位命中")):
             tile = _KpiTile(cap)
             self.phase_kpis[key] = tile
             phase_lay.addWidget(tile, 1)
@@ -1036,7 +1039,7 @@ class AnalysisView(QWidget):
         # was measured then, and rewriting it would destroy that.
         self._rederived = False
         phase_refresh = (self.flicks and rep.shot_outcomes
-                         and "mean_peak_speed_counts_s" not in
+                         and "primary_only_hits" not in
                          (rep.click_phases or {}))
         if (self.flicks and self._settings is not None
                 and (rep.flick_floor_deg != MIN_FLICK_DEG or phase_refresh)):
@@ -1080,7 +1083,9 @@ class AnalysisView(QWidget):
             self.replay.clear("轨迹文件已损坏，无法读取"
                               if self._trace_unreadable else "本局没有鼠标轨迹")
         elif self.moments.currentRow() < 0:
-            self.replay.load(self.trace, label="整局", flicks=self.flicks)
+            self.replay.load(
+                self.trace, label="整局", flicks=self.flicks,
+                deg_per_count=rep.deg_per_count)
         self._update_clip_state(self._moment_index(self.moments.currentRow()))
 
     def load_report_file(self, path: Path | str) -> None:
@@ -1209,12 +1214,15 @@ class AnalysisView(QWidget):
                    "甩枪用时本身仍然有效。")
         phases = rep.click_phases or {}
         if int(phases.get("labeled", 0) or 0):
+            primary = int(phases.get(
+                "primary_only_hits", phases.get("direct_hits", 0)) or 0)
             why += (
                 f" 已对齐 {int(phases.get('labeled', 0))} 次逐目标点击："
-                f"直接命中 {int(phases.get('direct_hits', 0))} 次，"
-                f"一次修正后命中 {int(phases.get('corrected_hits', 0))} 次，"
+                f"单峰直接定位命中 {primary} 次，"
+                f"平滑末端控制后命中 {int(phases.get('smooth_terminal_hits', 0))} 次，"
+                f"独立微调后命中 {int(phases.get('discrete_adjust_hits', 0))} 次，"
                 f"连续修正后命中 {int(phases.get('repair_chain_hits', 0))} 次，"
-                f"无修正直接点空 {int(phases.get('uncorrected_misses', 0))} 次。")
+                f"未检测到末端控制而点空 {int(phases.get('uncorrected_misses', 0))} 次。")
         self.kpis["flick"].set_value(
             f"{rep.mean_flick_ms:.0f}" if rep.mean_flick_ms > 0 else "—", "ms",
             read, tone, why)
@@ -1268,7 +1276,8 @@ class AnalysisView(QWidget):
                 tone,
                 f"在 {transitions} 次检测到微调的点击中，从快速定位峰值制动到低速谷值平均用时 "
                 f"{brake_ms:.0f} 毫秒；微调阶段平均速度 {micro}，相对主移动阶段平均{relation} "
-                f"{abs(slowdown):.1%}。分界采用与修正计数相同的 15%/35% 速度滞回阈值。" + warning)
+                f"{abs(slowdown):.1%}。明显微调采用 15%/35% 速度滞回；平滑末端控制还会检查"
+                "较浅的二次加速和末端方向偏转。" + warning)
         else:
             self.phase_kpis["slowdown"].set_value(
                 "—", "速度变化", "没有检测到阶段转换", "dim",
@@ -1276,12 +1285,17 @@ class AnalysisView(QWidget):
                 "因此不生成减速比例。" + warning)
 
         hits = int(phases.get("hits", 0) or 0)
-        direct = int(phases.get("direct_hits", 0) or 0)
-        direct_rate = float(phases.get("direct_hit_rate", 0.0) or 0.0)
+        direct = int(phases.get(
+            "primary_only_hits", phases.get("direct_hits", 0)) or 0)
+        direct_rate = float(phases.get(
+            "primary_only_hit_rate", phases.get("direct_hit_rate", 0.0)) or 0.0)
+        smooth = int(phases.get("smooth_terminal_hits", 0) or 0)
+        discrete = int(phases.get("discrete_adjust_hits", 0) or 0)
         self.phase_kpis["direct"].set_value(
             str(direct), "次命中", f"占已对齐命中的 {direct_rate:.0%}", tone,
-            f"{hits} 次已对齐命中里，有 {direct} 次在快速定位后没有检测到微调仍然命中"
-            f"（{direct_rate:.1%}）。这类动作与“没有微调且点空”分开统计；直接命中不是错误。"
+            f"{hits} 次已对齐命中里，有 {direct} 次只检测到一个平滑主移动峰"
+            f"（{direct_rate:.1%}）；另有 {smooth} 次平滑末端控制和 {discrete} 次独立微调后命中。"
+            "“单峰”只表示原始输入没有出现可靠的次级运动学特征，不声称视频中绝对没有细小修正。"
             + warning)
 
     # ------------------------------------------------------------------ coach
@@ -1489,10 +1503,11 @@ class AnalysisView(QWidget):
             self.replay.load(self.trace, m["t_start"], m["t_end"],
                              label={
                                  "overshoot": "过冲", "hesitation": "犹豫与连续修正",
-                                 "unconfirmed_miss": "无修正直接点空",
+                                 "unconfirmed_miss": "未检测到末端控制的点空",
                                  "slow_flick": "较慢甩枪", "clean_flick": "干净甩枪",
                              }.get(m["kind"], "关键片段"),
-                             flicks=self.flicks)
+                             flicks=self.flicks,
+                             deg_per_count=self.report.deg_per_count)
 
     def _show_full_run(self) -> None:
         """Back out to the whole run. The selection is cleared first so the
@@ -1500,7 +1515,10 @@ class AnalysisView(QWidget):
         if self.trace is None or len(self.trace) <= 1:
             return
         self.moments.setCurrentRow(-1)        # _select_moment(-1) clears clip state
-        self.replay.load(self.trace, label="整局", flicks=self.flicks)
+        self.replay.load(
+            self.trace, label="整局", flicks=self.flicks,
+            deg_per_count=(self.report.deg_per_count
+                           if self.report is not None else 0.0))
 
     # ------------------------------------------------------------------
     def _clips_off_reason(self) -> str | None:

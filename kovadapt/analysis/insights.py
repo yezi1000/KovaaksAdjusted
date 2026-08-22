@@ -142,9 +142,9 @@ def generate_insights(
                 and miss_share >= _UNCONFIRMED_MISS_SHARE):
             out.append(_from_kb(
                 "dx-static-unconfirmed-miss", "diagnosis", "attention",
-                "Static clicks are being fired before the needed correction",
+                "Static clicks are being fired without a detected terminal-control phase",
                 f"{unconfirmed} of {misses} matched misses ({miss_share:.0%}) had "
-                "no detectable corrective submovement before the shot, across "
+                "no detectable smooth or discrete terminal-control phase before the shot, across "
                 f"{labeled} outcome-linked clicks (cutoffs "
                 f"{_STATIC_PHASE_MIN_CLICKS} clicks / "
                 f"{_STATIC_PHASE_MIN_MISSES} misses / "
