@@ -16,6 +16,7 @@ name: release
 
 on:
   push:
+    branches: ["feat/zh-cn-ui"]
     tags: ["v*"]
   workflow_dispatch: {}       # lets a build be rehearsed without cutting a tag
 
