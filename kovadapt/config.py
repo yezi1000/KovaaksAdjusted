@@ -58,12 +58,31 @@ def default_archetype_overrides() -> dict[str, dict[str, float]]:
 def find_kovaaks_root() -> Path | None:
     """Locate the FPSAimTrainer directory (env var KOVAAKS_ROOT wins)."""
     env = os.environ.get("KOVAAKS_ROOT")
-    if env and Path(env).is_dir():
-        return Path(env)
+    if env:
+        found = normalize_kovaaks_root(env)
+        if found is not None:
+            return found
     for cand in _STEAM_CANDIDATES:
-        p = Path(cand)
-        if (p / "stats").is_dir():
-            return p
+        found = normalize_kovaaks_root(cand)
+        if found is not None:
+            return found
+    return None
+
+
+def normalize_kovaaks_root(value: str | Path) -> Path | None:
+    """Return the usable KovaaK's data root behind a selected directory.
+
+    Steam installs commonly expose two identically named levels.  The app
+    needs the inner one containing ``stats``; accepting either level in the
+    picker avoids making the user reverse-engineer that layout.
+    """
+    raw = str(value).strip().strip('"')
+    if not raw:
+        return None
+    selected = Path(raw).expanduser()
+    for candidate in (selected, selected / "FPSAimTrainer"):
+        if (candidate / "stats").is_dir():
+            return candidate.resolve()
     return None
 
 
@@ -179,7 +198,13 @@ class Settings:
         if not self.kovaaks_root:
             found = find_kovaaks_root()
             self.kovaaks_root = str(found) if found else ""
-        self.root = Path(self.kovaaks_root) if self.kovaaks_root else Path(".")
+        self.set_kovaaks_root(self.kovaaks_root)
+
+    def set_kovaaks_root(self, value: str | Path) -> None:
+        """Update both the persisted string and every derived path at once."""
+        raw = str(value).strip()
+        self.kovaaks_root = raw
+        self.root = Path(raw) if raw else Path(".")
 
     @property
     def stats_dir(self) -> Path:

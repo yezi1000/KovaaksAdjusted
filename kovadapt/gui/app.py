@@ -166,8 +166,7 @@ class MainWindow(QMainWindow):
         # backdrop to look again. The signal was declared and emitted with no
         # receivers at all, so the motion setting did not take effect until
         # the next alt-tab.
-        self.config.settings_changed.connect(
-            lambda _s: self.backdrop.motion_changed())
+        self.config.settings_changed.connect(self._settings_changed)
 
         # Ctrl+1..N jump straight to a section (Ctrl+6 = How it learns)
         for i in range(self.space.count()):
@@ -185,8 +184,16 @@ class MainWindow(QMainWindow):
 
         sb = self.statusBar()
         sb.showMessage(
-            f"KovaaK's：{settings.kovaaks_root or '未找到 — 请设置 KOVAAKS_ROOT'}"
+            f"KovaaK's：{settings.kovaaks_root or '未找到 — 请在适配设置中选择安装目录'}"
         )
+
+    def _settings_changed(self, _settings: Settings) -> None:
+        """Apply settings that can safely refresh without rebuilding pages."""
+        self.backdrop.motion_changed()
+        self.browser.refresh()
+        self.dashboard.refresh_scenarios()
+        self.statusBar().showMessage(
+            f"KovaaK's：{self.s.kovaaks_root or '未设置 — 请在适配设置中选择安装目录'}")
 
     # ----------------------------------------------------------- corner bar
     def _corner(self) -> QWidget:

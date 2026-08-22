@@ -11,22 +11,26 @@ no nested scroll of their own.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from ..config import Settings
+from ..config import Settings, normalize_kovaaks_root
 from .i18n import archetype_name, tr
 from .onboarding import HintBar
 
@@ -88,6 +92,33 @@ class ConfigView(QWidget):
         super().__init__(parent)
         self.s = settings
         s = settings
+
+        # Installation path.  Auto-discovery is convenient until Steam lives
+        # on an unusual library drive; this is the explicit escape hatch that
+        # Settings has always supported but the GUI never exposed.
+        self.root_edit = QLineEdit(s.kovaaks_root)
+        self.root_edit.setClearButtonEnabled(True)
+        self.root_edit.setPlaceholderText(
+            r"例如 D:\SteamLibrary\steamapps\common\FPSAimTrainer\FPSAimTrainer")
+        self.root_edit.setToolTip(
+            "请选择包含 stats 文件夹的 FPSAimTrainer 目录；选择外层同名目录也会自动识别。")
+        self.root_browse = QPushButton("选择文件夹…")
+        self.root_browse.clicked.connect(self._browse_root)
+        root_row = QWidget()
+        root_lay = QHBoxLayout(root_row)
+        root_lay.setContentsMargins(0, 0, 0, 0)
+        root_lay.setSpacing(8)
+        root_lay.addWidget(self.root_edit, 1)
+        root_lay.addWidget(self.root_browse)
+        self.root_state = QLabel("")
+        self.root_state.setWordWrap(True)
+        self.root_state.setProperty("dim", True)
+        install = QGroupBox("KovaaK's 安装目录")
+        f = _form(install)
+        f.addRow("游戏数据路径", root_row)
+        f.addRow(self.root_state)
+        self.root_edit.textChanged.connect(self._update_root_state)
+        self._update_root_state()
 
         # mouse & sensitivity — feeds the model's per-task sensitivity
         # reasoning. getattr-guarded: the fields may land in a later build.
@@ -309,7 +340,7 @@ class ConfigView(QWidget):
         lay.addWidget(HintBar(settings, (
             "每个参数都有悬停说明。默认值就是软件初始行为；随时可以点击"
             "<b>恢复默认值</b>回到初始设置。所有改动只有点击<b>保存设置</b>后才会生效。")))
-        for box in (mouse, diff, reg, mov, tel, adv, dodge, fat, arch):
+        for box in (install, mouse, diff, reg, mov, tel, adv, dodge, fat, arch):
             lay.addWidget(box)
         lay.addLayout(bar)
         lay.addStretch(1)
@@ -330,6 +361,28 @@ class ConfigView(QWidget):
             return
         cm = 2.54 * 360.0 / counts_per_deg
         self.cm360.setText(f"{cm:.1f} cm / 360°")
+
+    def _update_root_state(self) -> None:
+        raw = self.root_edit.text().strip()
+        if not raw:
+            self.root_state.setText(
+                "尚未设置；保存其他选项不受影响，但场景浏览和训练启动不可用。")
+            return
+        root = normalize_kovaaks_root(raw)
+        if root is None:
+            self.root_state.setText(
+                "未识别：所选目录或其内层 FPSAimTrainer 中没有 stats 文件夹。")
+        else:
+            self.root_state.setText(f"已识别游戏数据目录：{root}")
+
+    def _browse_root(self) -> None:
+        start = self.root_edit.text().strip() or str(Path.home())
+        chosen = QFileDialog.getExistingDirectory(
+            self, "选择 KovaaK's 的 FPSAimTrainer 文件夹", start)
+        if not chosen:
+            return
+        root = normalize_kovaaks_root(chosen)
+        self.root_edit.setText(str(root) if root is not None else chosen)
 
     def _reset(self) -> None:
         """Load shipped defaults into every widget (Save still required)."""
@@ -379,6 +432,14 @@ class ConfigView(QWidget):
 
     def _save(self) -> None:
         s = self.s
+        raw_root = self.root_edit.text().strip()
+        root = normalize_kovaaks_root(raw_root) if raw_root else None
+        if raw_root and root is None:
+            self.status.setText(
+                "未保存：KovaaK's 路径无效，请选择包含 stats 文件夹的目录。")
+            self.root_edit.setFocus()
+            return
+        s.set_kovaaks_root(root if root is not None else "")
         # plain attribute set is safe even before the fields land on Settings
         s.mouse_dpi = self.dpi.value()
         s.game_sens = self.sens.value()

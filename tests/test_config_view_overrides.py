@@ -63,6 +63,59 @@ def test_save_does_not_invent_overrides(qapp, settings):
     view.deleteLater()
 
 
+def test_install_path_accepts_outer_steam_folder_and_updates_derived_paths(
+        qapp, settings, tmp_path):
+    outer = tmp_path / "OtherLibrary" / "FPSAimTrainer"
+    inner = outer / "FPSAimTrainer"
+    (inner / "stats").mkdir(parents=True)
+    old_profile_dir = settings.profile_dir
+
+    view = _view(settings)
+    view.root_edit.setText(str(outer))
+    view._save()
+
+    assert settings.kovaaks_root == str(inner.resolve())
+    assert settings.root == inner.resolve()
+    assert settings.stats_dir == inner.resolve() / "stats"
+    assert settings.profile_dir == old_profile_dir, "changing the game path moved history"
+    assert "已保存" in view.status.text()
+    view.deleteLater()
+
+
+def test_invalid_install_path_blocks_save_without_mutating_settings(
+        qapp, settings, tmp_path):
+    original_root = settings.root
+    original_dpi = settings.mouse_dpi
+    view = _view(settings)
+    view.root_edit.setText(str(tmp_path / "not-kovaaks"))
+    view.dpi.setValue(original_dpi + 400)
+
+    view._save()
+
+    assert settings.root == original_root
+    assert settings.mouse_dpi == original_dpi
+    assert "路径无效" in view.status.text()
+    view.deleteLater()
+
+
+def test_browse_button_normalizes_the_selected_outer_folder(
+        qapp, settings, tmp_path, monkeypatch):
+    outer = tmp_path / "SteamLibrary" / "FPSAimTrainer"
+    inner = outer / "FPSAimTrainer"
+    (inner / "stats").mkdir(parents=True)
+    view = _view(settings)
+    monkeypatch.setattr(
+        "kovadapt.gui.config_view.QFileDialog.getExistingDirectory",
+        lambda *_args, **_kwargs: str(outer),
+    )
+
+    view.root_browse.click()
+
+    assert view.root_edit.text() == str(inner.resolve())
+    assert "已识别游戏数据目录" in view.root_state.text()
+    view.deleteLater()
+
+
 def test_global_edit_still_reaches_inheriting_archetypes(qapp, settings):
     """focus_weight is inherited by tracking (only switching overrides it).
 
