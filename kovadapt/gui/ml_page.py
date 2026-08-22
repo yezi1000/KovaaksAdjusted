@@ -444,7 +444,11 @@ _FLICK = (
     "and speed only after accuracy is stable. Known misses also count against their spatial "
     "region, so a zero-correction miss is never praised as a clean flick. The boundary is "
     "explicit: Raw Input has no target-centre pixels, so kovadapt can prove whether a linked "
-    "shot hit and whether correction occurred, but not the exact pixel error at landing."
+    "shot hit and whether correction occurred, but not the exact pixel error at landing. "
+    "The review also reports acquisition peak and phase-average speed. The same 15/35-percent "
+    "speed hysteresis used to count corrections marks the transition into micro-adjustment, "
+    "so braking time, adjustment speed, and the phase speed drop share one definition. Hits "
+    "with no detected correction are counted separately as successful direct acquisitions."
 )
 
 _BANDIT = (
@@ -553,7 +557,10 @@ _FLICK_ZH = (
     "包含主要的快速移动，以及在需要时完成确认的修正子动作；因此训练顺序改为先做干净的一次定位，"
     "落点不确定时只做一次有意识微调，准确率稳定后再提高速度。已确认的点空也会计入对应区域的弱项，"
     "不会再被误夸成“干净甩枪”。能力边界同样明确：原始输入不包含目标中心像素，所以系统能判断"
-    "对应点击是否命中、是否发生微调，但不能声称准星落点距离目标中心多少像素。"
+    "对应点击是否命中、是否发生微调，但不能声称准星落点距离目标中心多少像素。复盘页还会统计"
+    "快速定位的峰值与阶段平均速度；当轨迹从峰值降到 15% 以下、随后重新超过 35% 时，系统沿用"
+    "修正计数的同一滞回规则，把它识别为进入微调，并报告制动耗时、微调速度和阶段速度下降比例。"
+    "没有检测到微调仍然命中的点击会单独计数，它代表一次定位成功，而不是需要改正的错误。"
 )
 _BANDIT_ZH = (
     "弱项具有空间位置。每次甩枪会被映射到墙面上的 5×5 网格：方向决定方位，幅度决定离中心的"

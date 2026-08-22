@@ -241,10 +241,11 @@ def report_summary_zh(rep: RunReport) -> str:
     labeled = int(phases.get("labeled", 0) or 0)
     misses = int(phases.get("misses", 0) or 0)
     raw_misses = int(phases.get("uncorrected_misses", 0) or 0)
+    direct = int(phases.get("direct_hits", 0) or 0)
     if labeled:
         lines.append(
             f"已把 {labeled} 次点击与逐目标结果对齐；其中 {misses} 次未命中，"
-            f"{raw_misses} 次是在没有检测到修正动作时直接击发。")
+            f"{direct} 次没有微调且直接命中，{raw_misses} 次没有微调且未命中。")
     return " ".join(lines)
 
 
@@ -753,6 +754,22 @@ class AnalysisView(QWidget):
             self.kpis[key] = tile
             kpi_lay.addWidget(tile, 1)
 
+        # Outcome-linked static-click phases. Kept separate from the four
+        # universal run KPIs because tracking and multi-hit scenarios cannot
+        # honestly populate these values.
+        self.phase_box = QGroupBox("静态点击动作阶段")
+        phase_lay = QHBoxLayout(self.phase_box)
+        phase_lay.setContentsMargins(12, 12, 12, 12)
+        phase_lay.setSpacing(12)
+        self.phase_kpis: dict[str, _KpiTile] = {}
+        for key, cap in (("acquire", "快速定位速度"),
+                         ("slowdown", "定位→微调减速"),
+                         ("direct", "无微调直接命中")):
+            tile = _KpiTile(cap)
+            self.phase_kpis[key] = tile
+            phase_lay.addWidget(tile, 1)
+        self.phase_box.hide()
+
         # ---- charts: side by side, each with a takeaway title + short caption
         self.bias_bars = viz.AsciiBars(title=analysis_zh(_BIAS_TITLE))
         self.bias_caption = _caption(analysis_zh(_BIAS_CAPTION_BASE))
@@ -869,6 +886,7 @@ class AnalysisView(QWidget):
                 "悬停来源数量即可查看。")))
         lay.addLayout(head)
         lay.addWidget(self.kpi_strip)
+        lay.addWidget(self.phase_box)
         lay.addWidget(self.charts)
         lay.addWidget(self.trend_w)
         lay.addWidget(self.detail, 1)
@@ -879,7 +897,7 @@ class AnalysisView(QWidget):
         # the viz widgets read theme.current() at paint time — update() is all
         for chart in (self.bias_bars, self.heat_map, self.trend_spark):
             chart.restyle()
-        for tile in self.kpis.values():
+        for tile in (*self.kpis.values(), *self.phase_kpis.values()):
             tile.restyle()
         self.replay.restyle()
         if self._last_insights is not None:
@@ -1017,8 +1035,11 @@ class AnalysisView(QWidget):
         # Re-derived in memory only — the file on disk is the record of what
         # was measured then, and rewriting it would destroy that.
         self._rederived = False
-        if (self.flicks and rep.flick_floor_deg != MIN_FLICK_DEG
-                and self._settings is not None):
+        phase_refresh = (self.flicks and rep.shot_outcomes
+                         and "mean_peak_speed_counts_s" not in
+                         (rep.click_phases or {}))
+        if (self.flicks and self._settings is not None
+                and (rep.flick_floor_deg != MIN_FLICK_DEG or phase_refresh)):
             rep = replace(rep)          # never mutate the caller's report
             apply_flick_metrics(rep, self.flicks,
                                 cols=self._settings.region_cols,
@@ -1197,6 +1218,71 @@ class AnalysisView(QWidget):
         self.kpis["flick"].set_value(
             f"{rep.mean_flick_ms:.0f}" if rep.mean_flick_ms > 0 else "—", "ms",
             read, tone, why)
+        self._fill_phase_kpis(rep, arche or "clicking")
+
+    def _fill_phase_kpis(self, rep: RunReport, arche: str) -> None:
+        """Show phase metrics only where one-hit outcomes prove them."""
+        phases = rep.click_phases or {}
+        labeled = int(phases.get("labeled", 0) or 0)
+        if arche != "clicking" or not labeled:
+            self.phase_box.hide()
+            return
+
+        self.phase_box.show()
+        degraded = input_degraded(rep)
+        tone = "warn" if degraded else "dim"
+        warning = (" 本局输入时序质量不足，速度仍可参考，但微调边界和次数不宜用于技术结论。"
+                   if degraded else "")
+
+        peak_counts = float(phases.get("mean_peak_speed_counts_s", 0.0) or 0.0)
+        primary_counts = float(
+            phases.get("mean_primary_speed_counts_s", 0.0) or 0.0)
+        if rep.deg_per_count > 0:
+            peak = peak_counts * rep.deg_per_count
+            primary = primary_counts * rep.deg_per_count
+            value, unit = f"{peak:.0f}", "°/秒"
+            speed_detail = f"峰值 {peak:.0f}°/s，主移动阶段平均 {primary:.0f}°/s"
+        else:
+            value, unit = f"{peak_counts:.0f}", "计数/秒"
+            speed_detail = (f"峰值 {peak_counts:.0f} counts/s，主移动阶段平均 "
+                            f"{primary_counts:.0f} counts/s；本局灵敏度单位无法解析，"
+                            "因此不换算为视角角速度")
+        self.phase_kpis["acquire"].set_value(
+            value if peak_counts > 0 else "—", unit,
+            f"{labeled} 次已对齐点击", tone,
+            f"快速定位速度统计 {labeled} 次与一击目标结果对齐的点击：{speed_detail}。"
+            "峰值反映爆发速度，阶段平均值同时包含加速和接近目标时的制动。" + warning)
+
+        transitions = int(phases.get("transition_samples", 0) or 0)
+        slowdown = float(phases.get("mean_transition_slowdown", 0.0) or 0.0)
+        brake_ms = float(phases.get("mean_brake_ms", 0.0) or 0.0)
+        micro_counts = float(
+            phases.get("mean_micro_adjust_speed_counts_s", 0.0) or 0.0)
+        if transitions:
+            micro = (f"{micro_counts * rep.deg_per_count:.0f}°/秒"
+                     if rep.deg_per_count > 0 else f"{micro_counts:.0f} 计数/秒")
+            relation = "下降" if slowdown >= 0 else "上升"
+            self.phase_kpis["slowdown"].set_value(
+                f"{abs(slowdown):.0%}", f"速度{relation}",
+                f"{transitions} 次转入微调",
+                tone,
+                f"在 {transitions} 次检测到微调的点击中，从快速定位峰值制动到低速谷值平均用时 "
+                f"{brake_ms:.0f} 毫秒；微调阶段平均速度 {micro}，相对主移动阶段平均{relation} "
+                f"{abs(slowdown):.1%}。分界采用与修正计数相同的 15%/35% 速度滞回阈值。" + warning)
+        else:
+            self.phase_kpis["slowdown"].set_value(
+                "—", "速度变化", "没有检测到阶段转换", "dim",
+                "本局已对齐点击中没有检测到从快速定位重新加速进入微调的完整阶段，"
+                "因此不生成减速比例。" + warning)
+
+        hits = int(phases.get("hits", 0) or 0)
+        direct = int(phases.get("direct_hits", 0) or 0)
+        direct_rate = float(phases.get("direct_hit_rate", 0.0) or 0.0)
+        self.phase_kpis["direct"].set_value(
+            str(direct), "次命中", f"占已对齐命中的 {direct_rate:.0%}", tone,
+            f"{hits} 次已对齐命中里，有 {direct} 次在快速定位后没有检测到微调仍然命中"
+            f"（{direct_rate:.1%}）。这类动作与“没有微调且点空”分开统计；直接命中不是错误。"
+            + warning)
 
     # ------------------------------------------------------------------ coach
     def _fill_insights(self, rep: RunReport, profile: PlayerProfile | None) -> None:

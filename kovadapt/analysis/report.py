@@ -311,10 +311,11 @@ def _summary_text(rep: "RunReport", flicks_exist: bool) -> str:
     if labeled:
         misses = int(phases.get("misses", 0) or 0)
         raw_misses = int(phases.get("uncorrected_misses", 0) or 0)
+        direct = int(phases.get("direct_hits", 0) or 0)
         lines.append(
             f"Matched {labeled} clicks to one-hit target outcomes: {misses} "
-            f"misses, including {raw_misses} fired without a detectable "
-            "corrective submovement.")
+            f"misses, {direct} hits without a detectable correction, and "
+            f"{raw_misses} misses fired without one.")
     ih = rep.input_health or {}
     # `or 0.0`: a report carrying a null polling value used to raise TypeError
     # here rather than simply skipping the note.

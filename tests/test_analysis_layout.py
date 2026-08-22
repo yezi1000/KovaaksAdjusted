@@ -110,6 +110,8 @@ def test_numbers_lead_charts_follow_coach_lands_last(qapp, settings):
     view = AnalysisView(settings)
     lay = view.layout()
     assert lay.indexOf(view.kpi_strip) < lay.indexOf(view.charts)
+    assert lay.indexOf(view.kpi_strip) < lay.indexOf(view.phase_box)
+    assert lay.indexOf(view.phase_box) < lay.indexOf(view.charts)
     assert lay.indexOf(view.charts) < lay.indexOf(view.detail)
     assert lay.indexOf(view.detail) < lay.indexOf(view.coach_box)
     # the 1400px column is spent sideways, not stacked in a narrow rail
@@ -117,6 +119,37 @@ def test_numbers_lead_charts_follow_coach_lands_last(qapp, settings):
     assert view.charts.count() == 2
     assert view.detail.orientation() == Qt.Horizontal
     assert len(view.kpis) == 4
+    view.deleteLater()
+
+
+def test_static_click_phase_metrics_are_visible_and_explicit(qapp, settings):
+    phases = {
+        "labeled": 12, "hits": 10, "misses": 2,
+        "direct_hits": 7, "direct_hit_rate": 0.7,
+        "mean_peak_speed_counts_s": 5000.0,
+        "mean_primary_speed_counts_s": 3000.0,
+        "transition_samples": 3,
+        "mean_micro_adjust_speed_counts_s": 900.0,
+        "mean_brake_ms": 24.0,
+        "mean_transition_slowdown": 0.70,
+    }
+    view = AnalysisView(settings)
+    view.show_report(
+        _report(n_flicks=12, deg_per_count=0.01, click_phases=phases),
+        profile=_profile(archetype="clicking"))
+
+    assert not view.phase_box.isHidden()
+    assert view.phase_kpis["acquire"].value.text() == "50"
+    assert view.phase_kpis["acquire"].unit.text() == "°/秒"
+    assert view.phase_kpis["slowdown"].value.text() == "70%"
+    assert "24 毫秒" in view.phase_kpis["slowdown"].toolTip()
+    assert view.phase_kpis["direct"].value.text() == "7"
+    assert "70%" in view.phase_kpis["direct"].read.text()
+
+    view.show_report(
+        _report(n_flicks=12, deg_per_count=0.01, click_phases=phases),
+        profile=_profile(archetype="tracking"))
+    assert view.phase_box.isHidden()
     view.deleteLater()
 
 
@@ -1137,6 +1170,25 @@ def test_a_saved_report_from_an_older_flick_floor_is_re_derived(qapp, settings):
     view.show_report(current, trace=trace, profile=_profile())
     assert view.report.n_flicks == 7 and view.report.mean_flick_ms == 321.0
     assert "re-derived" not in view.summary.text()
+
+
+def test_saved_outcome_report_backfills_new_phase_metrics(qapp, settings):
+    """Reports written after outcome linking but before phase-speed fields
+    can recover the new metrics from their still-present trace and labels."""
+    trace = (TraceBuilder(t0=1000.0)
+             .flick(200, 0).flick(-200, 0, overshoot=0.25).build())
+    outcomes = [{"t_click": float(t), "hit": True} for t in trace.clicks]
+    stale = _report(
+        n_flicks=2, shot_outcomes=outcomes,
+        click_phases={"labeled": 2, "hits": 2, "direct_hits": 1})
+
+    view = AnalysisView(settings)
+    view.show_report(stale, trace=trace, profile=_profile(archetype="clicking"))
+
+    assert "mean_peak_speed_counts_s" in view.report.click_phases
+    assert view.report.click_phases["transition_samples"] == 1
+    assert not view.phase_box.isHidden()
+    view.deleteLater()
 
 
 @pytest.mark.parametrize("width", [1180, 1360, 1490, 1920])

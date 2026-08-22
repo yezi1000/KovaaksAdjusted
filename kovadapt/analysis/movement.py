@@ -42,6 +42,14 @@ class Flick:
     # one-hit acquisition.  None means the stats could not safely identify
     # this click; False is a real miss, not a low-quality heuristic.
     hit: bool | None = None
+    # Phase metrics.  A correction begins at the first post-peak low-speed
+    # valley (<15% of peak) that is followed by re-acceleration (>35%).
+    # Speeds remain in counts/s here; reports carry the run's deg/count for
+    # an honest conversion to view-angle speed at render time.
+    primary_mean_speed: float = 0.0
+    micro_adjust_speed: float = 0.0
+    brake_ms: float = 0.0
+    transition_slowdown: float = 0.0
 
     @property
     def horizontal(self) -> str:
@@ -173,11 +181,33 @@ def segment_flicks(
         # sample-level jitter of integer mouse counts.
         post = speed[ipk:ic]
         corrections = 0
+        primary_end = ic
+        micro_start: int | None = None
         if post.size >= 3:
             m = np.where(post < 0.15 * pk, -1, np.where(post > 0.35 * pk, 1, 0))
-            m = m[m != 0]
-            if m.size >= 2:
-                corrections = int(np.sum((m[:-1] == -1) & (m[1:] == 1)))
+            nz = np.flatnonzero(m)
+            states = m[nz]
+            if states.size >= 2:
+                transitions = np.flatnonzero(
+                    (states[:-1] == -1) & (states[1:] == 1))
+                corrections = int(transitions.size)
+                if transitions.size:
+                    first = int(transitions[0])
+                    primary_end = ipk + int(nz[first])
+                    micro_start = ipk + int(nz[first + 1])
+
+        primary_slice = speed[ion:max(primary_end + 1, ion + 1)]
+        primary_mean = float(np.mean(primary_slice)) if primary_slice.size else 0.0
+        micro_mean = 0.0
+        brake_ms = 0.0
+        slowdown = 0.0
+        if micro_start is not None and primary_mean > 0:
+            # Include the valley in the adjustment phase: the controlled
+            # deceleration is part of the transition, not dead time to hide.
+            adjust = speed[primary_end:ic]
+            micro_mean = float(np.mean(adjust)) if adjust.size else 0.0
+            brake_ms = max(float(tg[primary_end] - tg[ipk]) * 1000.0, 0.0)
+            slowdown = float(np.clip(1.0 - micro_mean / primary_mean, -1.0, 1.0))
 
         flicks.append(
             Flick(
@@ -190,6 +220,10 @@ def segment_flicks(
                 time_to_peak=float(tg[ipk] - tg[ion]),
                 overshoot=overshoot,
                 corrections=corrections,
+                primary_mean_speed=primary_mean,
+                micro_adjust_speed=micro_mean,
+                brake_ms=brake_ms,
+                transition_slowdown=slowdown,
             )
         )
     return flicks
@@ -275,12 +309,18 @@ def click_phase_metrics(flicks: list[Flick]) -> dict:
     repair_hits = sum(f.corrections >= 2 for f in hits)
     uncorrected_misses = sum(f.corrections == 0 for f in misses)
     corrected_misses = len(misses) - uncorrected_misses
+    transitions = [f for f in labeled
+                   if f.corrections > 0 and f.primary_mean_speed > 0
+                   and f.micro_adjust_speed > 0]
+    primary_speeds = [f.primary_mean_speed for f in labeled
+                      if f.primary_mean_speed > 0]
     return {
         "labeled": len(labeled),
         "hits": len(hits),
         "misses": len(misses),
         "linked_hit_rate": len(hits) / len(labeled),
         "direct_hits": direct_hits,
+        "direct_hit_rate": direct_hits / len(hits) if hits else 0.0,
         "corrected_hits": corrected_hits,
         "repair_chain_hits": repair_hits,
         "uncorrected_misses": uncorrected_misses,
@@ -288,6 +328,19 @@ def click_phase_metrics(flicks: list[Flick]) -> dict:
         "uncorrected_miss_rate": uncorrected_misses / len(labeled),
         "uncorrected_share_of_misses": (
             uncorrected_misses / len(misses) if misses else 0.0),
+        "mean_peak_speed_counts_s": float(np.mean(
+            [f.peak_speed for f in labeled])),
+        "mean_primary_speed_counts_s": (
+            float(np.mean(primary_speeds)) if primary_speeds else 0.0),
+        "transition_samples": len(transitions),
+        "mean_micro_adjust_speed_counts_s": (
+            float(np.mean([f.micro_adjust_speed for f in transitions]))
+            if transitions else 0.0),
+        "mean_brake_ms": (float(np.mean([f.brake_ms for f in transitions]))
+                          if transitions else 0.0),
+        "mean_transition_slowdown": (
+            float(np.mean([f.transition_slowdown for f in transitions]))
+            if transitions else 0.0),
     }
 
 

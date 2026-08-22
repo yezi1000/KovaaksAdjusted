@@ -247,6 +247,36 @@ def test_one_shot_stats_label_misses_and_prevent_a_false_clean_reference():
     assert clean and "180-count left" not in clean[0].text
 
 
+def test_static_click_phase_speed_slowdown_and_direct_hits():
+    """The phase boundary uses the correction detector's own hysteresis.
+    A clean direct hit contributes acquisition speed; an overshoot-and-return
+    hit additionally contributes braking and micro-adjust speed."""
+    b = TraceBuilder()
+    b.flick(200, 0)
+    b.flick(-200, 0, overshoot=0.25)
+    flicks = segment_flicks(b.build())
+    assert len(flicks) == 2
+    for flick in flicks:
+        flick.hit = True
+
+    direct, corrected = flicks
+    assert direct.corrections == 0
+    assert corrected.corrections == 1
+    assert corrected.primary_mean_speed > corrected.micro_adjust_speed > 0
+    assert corrected.brake_ms > 0
+    assert 0 < corrected.transition_slowdown < 1
+
+    phases = click_phase_metrics(flicks)
+    assert phases["direct_hits"] == 1
+    assert phases["direct_hit_rate"] == pytest.approx(0.5)
+    assert phases["transition_samples"] == 1
+    assert phases["mean_peak_speed_counts_s"] > 0
+    assert phases["mean_primary_speed_counts_s"] > 0
+    assert phases["mean_micro_adjust_speed_counts_s"] > 0
+    assert phases["mean_brake_ms"] > 0
+    assert 0 < phases["mean_transition_slowdown"] < 1
+
+
 # ----------------------------------------------------------------- run report
 def test_a_report_records_the_flick_floor_it_was_measured_at(fixtures, tmp_path):
     """Reports are this app's long-lived evidence — the Changes ledger pools
