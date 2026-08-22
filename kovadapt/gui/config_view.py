@@ -176,7 +176,11 @@ class ConfigView(QWidget):
         self.clips = QCheckBox(
             tr("Capture video clips of notable moments (needs kovadapt[clips])"))
         self.clips.setChecked(s.clips_enabled)
-        self.clip_fps = _ispin(s.clip_fps, 10, 60)
+        self.clip_fps = _ispin(
+            s.clip_fps, 10, 120,
+            "关键片段录像的目标采样率。60 FPS 占用较低；120 FPS 更容易看清快速甩枪与微调，"
+            "但循环缓冲的内存和编码负载大约翻倍。")
+        self.clip_fps.setSingleStep(10)
         self.clip_buf = _dspin(s.clip_buffer_seconds, 30.0, 300.0, 10.0, 0)
         tel = QGroupBox(tr("Telemetry & clips"))
         f = _form(tel)

@@ -311,6 +311,18 @@ def test_config_sensitivity_group_computes_cm360(qapp, settings):
     view.deleteLater()
 
 
+def test_clip_capture_allows_high_frame_rate(qapp, settings):
+    """High-refresh aim review needs more than the old 60 FPS ceiling."""
+    from kovadapt.gui.config_view import ConfigView
+
+    view = ConfigView(settings)
+    assert view.clip_fps.maximum() == 120
+    view.clip_fps.setValue(120)
+    view._save()
+    assert settings.clip_fps == 120
+    view.deleteLater()
+
+
 def test_hint_bars_tuck_away(qapp, settings):
     from kovadapt.gui.onboarding import HintBar, set_hints_visible
 
