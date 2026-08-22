@@ -7,14 +7,17 @@ Visual language (all derived from the recorded MouseTrace — no video):
     red halo          flawed flicks (overshoot > 10% or >= 2 corrections)
     red ✕             shots (left clicks)
     bright dot+trail  playhead sweeping in (scaled) real time
+    numbered red x    1-based click index shared with analysis conclusions
 
 The path/flicks/shots checkboxes in the control bar hide layers without
 touching the item architecture — they only flip setVisible on the items.
 
 Lightweight by construction: the overlays are exactly two PlotCurveItems
 regardless of flick count (NaN-separated segments), the path is decimated
-above ~50k points, and the QTimer only runs during playback. Playback time
-comes from QElapsedTimer, so speed is wall-clock accurate under load.
+above ~50k points, and the QTimer only runs during playback.  The 120 Hz
+playhead moves one cached graphics item; the more expensive trail and slider
+refresh at 30 Hz. Playback time comes from QElapsedTimer, so speed is
+wall-clock accurate under load.
 """
 
 from __future__ import annotations
@@ -40,6 +43,8 @@ from .i18n import tr
 _MAX_POINTS = 50_000          # decimation cap for the drawn path
 _TRAIL_SECONDS = 1.2          # live comet-trail length (full path stays dim below)
 _SLIDER_STEPS = 1000
+_PLAYHEAD_INTERVAL_MS = 8     # 125 timer wakes/s; display presents up to its refresh rate
+_SLOW_LAYER_DIVISOR = 4       # trail + slider refresh at ~31 Hz
 # Flick quality thresholds (match analysis conventions: overshoot_rate uses
 # 0.1, notable "clean" uses <= 1 correction).
 _FLAWED_OVERSHOOT = 0.10
@@ -60,12 +65,19 @@ class TrajectoryReplay(QWidget):
         self._x = np.empty(0)
         self._y = np.empty(0)
         self._point_speed = np.empty(0)
+        self._click_times = np.empty(0)
+        self._click_x = np.empty(0)
+        self._click_y = np.empty(0)
+        self._click_numbers = np.empty(0, dtype=np.int32)
         self._speed_bounds = (0.0, 0.0)
         self._deg_per_count = 0.0
         self._pos = 0.0          # playhead (s from segment start)
         self._speed = 0.5        # default half speed: flicks are fast
         self._clock = QElapsedTimer()
         self._clock_base = 0.0   # _pos when the clock (re)started
+        self._frame_seq = 0
+        self._head_band = -1
+        self._active_shot = -1
 
         self.plot = pg.PlotWidget()
         self.plot.setAspectLocked(True)
@@ -81,10 +93,17 @@ class TrajectoryReplay(QWidget):
         self._good = self.plot.plot([], [], connect="finite")
         self._bad = self.plot.plot([], [], connect="finite")
         self._live = self.plot.plot([], [])
+        # The head owns one cached spot at local (0, 0). Animation uses
+        # QGraphicsItem.setPos(), avoiding ScatterPlotItem.setData() and its
+        # per-frame data/bounds/cache rebuild.
         self._head = pg.ScatterPlotItem(size=10, pen=None)
-        self._shots = pg.ScatterPlotItem(size=14, brush=None, symbol="x")
+        self._shots = pg.ScatterPlotItem(
+            size=14, brush=None, symbol="x", hoverable=True,
+            tip=lambda _x, _y, data: f"第 {int(data)} 次点击")
+        self._shot_label = pg.TextItem(anchor=(0.5, 1.35))
         self.plot.addItem(self._head)
         self.plot.addItem(self._shots)
+        self.plot.addItem(self._shot_label)
         self._full.setZValue(0)
         self._good.setZValue(1)
         self._bad.setZValue(1)
@@ -93,6 +112,9 @@ class TrajectoryReplay(QWidget):
         self._live.setZValue(3)
         self._head.setZValue(4)
         self._shots.setZValue(4)
+        self._shot_label.setZValue(5)
+        self._shot_label.hide()
+        self._shots.sigClicked.connect(self._shot_clicked)
 
         self.btn = QPushButton(tr("Replay"))
         self.btn.clicked.connect(self.toggle)
@@ -105,12 +127,13 @@ class TrajectoryReplay(QWidget):
         self.toggle_flicks.setToolTip(
             "显示甩枪质量：绿色表示干净，红色表示过冲或二次修正")
         self.toggle_shots = QCheckBox(tr("shots"))
-        self.toggle_shots.setToolTip("以 ✕ 标出每次射击的位置")
+        self.toggle_shots.setToolTip(
+            "以 ✕ 标出每次射击的位置；悬停或播放到该点可查看点击序号")
         for box in (self.toggle_path, self.toggle_flicks, self.toggle_shots):
             box.setChecked(True)
         self.toggle_path.toggled.connect(self._set_path_visible)
         self.toggle_flicks.toggled.connect(self._set_flicks_visible)
-        self.toggle_shots.toggled.connect(self._shots.setVisible)
+        self.toggle_shots.toggled.connect(self._set_shots_visible)
         self.scrub = QSlider(Qt.Horizontal)
         self.scrub.setRange(0, _SLIDER_STEPS)
         self.scrub.sliderMoved.connect(self._scrubbed)
@@ -138,7 +161,8 @@ class TrajectoryReplay(QWidget):
         lay.addWidget(self.plot, 1)
 
         self._timer = QTimer(self)
-        self._timer.setInterval(16)  # ~60 fps
+        self._timer.setTimerType(Qt.PreciseTimer)
+        self._timer.setInterval(_PLAYHEAD_INTERVAL_MS)
         self._timer.timeout.connect(self._tick)
         self.restyle()
 
@@ -170,19 +194,24 @@ class TrajectoryReplay(QWidget):
         self._head.setBrush(pg.mkBrush(
             self._color_for_speed(current_speed) if self._point_speed.size
             else QColor(pal.accent)))
+        self._head_band = self._speed_band(current_speed)
         self._shots.setPen(pg.mkPen(pal.bad, width=2))
+        self._shot_label.setColor(QColor(pal.fg))
         self._update_legend()
 
     def _color_for_speed(self, value: float) -> QColor:
         """Palette-aware speed-band colour for the playhead."""
         colors = (_SPEED_COLORS_DARK if theme.current().is_dark
                   else _SPEED_COLORS_LIGHT)
+        return QColor(colors[self._speed_band(value)])
+
+    def _speed_band(self, value: float) -> int:
+        """Quantise speed without allocating a QColor on every animation tick."""
         lo, hi = self._speed_bounds
         if hi <= lo:
-            return QColor(colors[0])
+            return 0
         norm = float(np.clip((value - lo) / (hi - lo), 0.0, 1.0))
-        band = min(int(norm * _SPEED_BANDS), _SPEED_BANDS - 1)
-        return QColor(colors[band])
+        return min(int(norm * _SPEED_BANDS), _SPEED_BANDS - 1)
 
     def _update_legend(self) -> None:
         pal = theme.current()
@@ -214,6 +243,10 @@ class TrajectoryReplay(QWidget):
         for curve in self._speed_curves:
             curve.setVisible(on)
 
+    def _set_shots_visible(self, on: bool) -> None:
+        self._shots.setVisible(on)
+        self._shot_label.setVisible(on and self._active_shot >= 0)
+
     # ------------------------------------------------------------------
     def load(self, trace: MouseTrace, t0: float | None = None,
              t1: float | None = None, label: str = "",
@@ -243,13 +276,13 @@ class TrajectoryReplay(QWidget):
         if t.size < 2:
             self._t = np.empty(0)
             self._point_speed = np.empty(0)
+            self._clear_clicks()
             self._speed_bounds = (0.0, 0.0)
             self._deg_per_count = max(float(deg_per_count or 0.0), 0.0)
             for item in (self._full, self._good, self._bad, self._live,
                          *self._speed_curves):
                 item.setData([], [])
             self._head.setData([], [])
-            self._shots.setData([], [])
             self.info.setText("此时间窗口内没有鼠标移动")
             self._update_legend()
             self._sync_transport()
@@ -266,18 +299,61 @@ class TrajectoryReplay(QWidget):
         self._full.setData(x, y)
         self._draw_speed_path()
         self._live.setData([], [])
-        self._head.setData([x[0]], [y[0]])
+        self._head.setData(np.array([0.0]), np.array([0.0]))
+        self._head.setPos(float(x[0]), float(y[0]))
         self._head.setBrush(pg.mkBrush(self._color_for_speed(
             float(point_speed[0]) if point_speed.size else 0.0)))
+        self._head_band = self._speed_band(
+            float(point_speed[0]) if point_speed.size else 0.0)
         clicks = seg.clicks - base
         ci = np.clip(np.searchsorted(self._t, clicks), 0, t.size - 1)
-        self._shots.setData(x[ci], y[ci])
+        # Preserve numbering from the complete trace even in a notable-moment
+        # window.  A skipped/too-small movement still consumes a click number.
+        click_numbers = np.searchsorted(trace.clicks, seg.clicks) + 1
+        self._click_times = np.asarray(clicks, dtype=np.float64)
+        self._click_x = np.asarray(x[ci], dtype=np.float64)
+        self._click_y = np.asarray(y[ci], dtype=np.float64)
+        self._click_numbers = np.asarray(click_numbers, dtype=np.int32)
+        self._shots.setData(
+            self._click_x, self._click_y, data=self._click_numbers)
+        self._set_active_shot(-1)
         self._draw_flicks(base, flicks or [])
         self._pos = 0.0
+        self._frame_seq = 0
         self.scrub.setValue(0)
         self.info.setText(label or f"{self._t[-1]:.2f} 秒 · {seg.clicks.size} 次射击")
         self.plot.autoRange()
         self._sync_transport()
+
+    def _clear_clicks(self) -> None:
+        self._click_times = np.empty(0)
+        self._click_x = np.empty(0)
+        self._click_y = np.empty(0)
+        self._click_numbers = np.empty(0, dtype=np.int32)
+        self._shots.setData([], [])
+        self._set_active_shot(-1)
+
+    def _set_active_shot(self, index: int) -> None:
+        """Move the single reusable number label to a click marker."""
+        if index < 0 or index >= self._click_numbers.size:
+            self._active_shot = -1
+            self._shot_label.hide()
+            return
+        if index != self._active_shot:
+            self._active_shot = index
+            self._shot_label.setText(f"第 {int(self._click_numbers[index])} 次点击")
+            self._shot_label.setPos(
+                float(self._click_x[index]), float(self._click_y[index]))
+        self._shot_label.setVisible(self.toggle_shots.isChecked())
+
+    def _shot_clicked(self, _item, points, _event) -> None:
+        """Pin the sequence label when a shot marker is clicked."""
+        if not points:
+            return
+        number = int(points[0].data())
+        matches = np.flatnonzero(self._click_numbers == number)
+        if matches.size:
+            self._set_active_shot(int(matches[0]))
 
     def _draw_speed_path(self) -> None:
         """Six NaN-separated curves, quantised by robust window speed."""
@@ -337,12 +413,12 @@ class TrajectoryReplay(QWidget):
         self.stop()
         self._t = np.empty(0)
         self._point_speed = np.empty(0)
+        self._clear_clicks()
         self._speed_bounds = (0.0, 0.0)
         for item in (self._full, self._good, self._bad, self._live,
                      *self._speed_curves):
             item.setData([], [])
         self._head.setData([], [])
-        self._shots.setData([], [])
         self.scrub.setValue(0)
         self.info.setText(message)
         self._update_legend()
@@ -372,6 +448,7 @@ class TrajectoryReplay(QWidget):
             if self._pos >= self._t[-1]:
                 self._pos = 0.0
             self._clock_base = self._pos
+            self._frame_seq = 0
             self._clock.start()
             self.btn.setText(tr("Stop"))
             self._timer.start()
@@ -393,7 +470,7 @@ class TrajectoryReplay(QWidget):
             return
         self.stop()
         self._pos = self._t[-1] * v / _SLIDER_STEPS
-        self._render()
+        self._render(force_slow=True)
 
     def _tick(self) -> None:
         if not self._t.size:
@@ -403,19 +480,36 @@ class TrajectoryReplay(QWidget):
         if self._pos >= self._t[-1]:
             self._pos = self._t[-1]
             self.stop()
-        self.scrub.blockSignals(True)
-        self.scrub.setValue(int(self._pos / self._t[-1] * _SLIDER_STEPS))
-        self.scrub.blockSignals(False)
-        self._render()
+        self._frame_seq += 1
+        force_slow = (self._pos >= self._t[-1]
+                      or self._frame_seq % _SLOW_LAYER_DIVISOR == 0)
+        if force_slow:
+            self.scrub.blockSignals(True)
+            self.scrub.setValue(int(self._pos / self._t[-1] * _SLIDER_STEPS))
+            self.scrub.blockSignals(False)
+        self._render(force_slow=force_slow)
 
-    def _render(self) -> None:
+    def _render(self, *, force_slow: bool = False) -> None:
         i = int(np.searchsorted(self._t, self._pos))
         i = max(min(i, self._t.size - 1), 1)
-        # Comet trail, not the whole prefix: repainting an ever-growing
-        # antialiased path each 16 ms tick stalls multi-minute replays
-        # (the dim full path is already drawn once underneath).
-        j = int(np.searchsorted(self._t, self._t[i - 1] - _TRAIL_SECONDS))
-        self._live.setData(self._x[j:i], self._y[j:i])
-        self._head.setData([self._x[i - 1]], [self._y[i - 1]])
-        self._head.setBrush(pg.mkBrush(
-            self._color_for_speed(float(self._point_speed[i - 1]))))
+        point = i - 1
+        # Transform-only update: the cached one-point ScatterPlotItem keeps
+        # its symbol atlas, bounds and data arrays across animation frames.
+        self._head.setPos(float(self._x[point]), float(self._y[point]))
+        band = self._speed_band(float(self._point_speed[point]))
+        if band != self._head_band:
+            self._head_band = band
+            self._head.setBrush(pg.mkBrush(self._color_for_speed(
+                float(self._point_speed[point]))))
+
+        # Comet tail is perceptually smooth at ~30 Hz while the head remains
+        # display-rate smooth.  This is the only animated layer that uploads
+        # an array, so keep it off the 125 Hz hot path.
+        if force_slow:
+            j = int(np.searchsorted(
+                self._t, self._t[point] - _TRAIL_SECONDS))
+            self._live.setData(self._x[j:i], self._y[j:i],
+                               skipFiniteCheck=True)
+
+        shot = int(np.searchsorted(self._click_times, self._pos, side="right") - 1)
+        self._set_active_shot(shot)

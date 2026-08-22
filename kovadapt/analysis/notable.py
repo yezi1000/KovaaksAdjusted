@@ -16,6 +16,7 @@ class NotableMoment:
     kind: str               # overshoot | hesitation | unconfirmed_miss | slow_flick | clean_flick
     severity: float         # 0..1 within this run
     text: str               # plain-language description for the UI
+    click_index: int = 0    # 1-based click number shared with the replay
 
 
 def _fmt_dir(f: Flick) -> str:
@@ -36,7 +37,8 @@ def find_notable_moments(
 
     def add(f: Flick, kind: str, severity: float, text: str) -> None:
         out.append(NotableMoment(f.t_onset - pad, f.t_click + pad, kind,
-                                 float(np.clip(severity, 0, 1)), text))
+                                 float(np.clip(severity, 0, 1)), text,
+                                 f.click_index))
 
     # Worst overshoots
     by_os = sorted(flicks, key=lambda f: f.overshoot, reverse=True)

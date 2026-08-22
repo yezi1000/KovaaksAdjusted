@@ -38,6 +38,10 @@ class Flick:
     time_to_peak: float
     overshoot: float        # fraction of amplitude, >= 0
     corrections: int
+    # 1-based index in the trace's original click stream.  This deliberately
+    # counts clicks that were too small to become Flick objects, so a report's
+    # "click 17" always points at the same red x in the replay.
+    click_index: int = 0
     # Linked from KovaaK's per-kill shot counts when the scenario exposes a
     # one-hit acquisition.  None means the stats could not safely identify
     # this click; False is a real miss, not a low-quality heuristic.
@@ -278,6 +282,7 @@ def segment_flicks(
                 time_to_peak=float(tg[ipk] - tg[ion]),
                 overshoot=overshoot,
                 corrections=corrections,
+                click_index=k + 1,
                 primary_mean_speed=primary_mean,
                 micro_adjust_speed=micro_mean,
                 brake_ms=brake_ms,
@@ -374,6 +379,16 @@ def click_phase_metrics(flicks: list[Flick]) -> dict:
                    and f.micro_adjust_speed > 0]
     primary_speeds = [f.primary_mean_speed for f in labeled
                       if f.primary_mean_speed > 0]
+    def click_indexes(items: list[Flick]) -> list[int]:
+        return [f.click_index for f in items if f.click_index > 0]
+    primary_hit_items = [f for f in hits if f.phase_kind == "primary_only"]
+    smooth_hit_items = [f for f in hits if f.phase_kind == "smooth_terminal"]
+    discrete_hit_items = [f for f in hits if f.phase_kind == "discrete_adjust"]
+    repair_hit_items = [f for f in hits if f.phase_kind == "repair_chain"]
+    uncorrected_miss_items = [f for f in misses
+                              if f.phase_kind == "primary_only"]
+    corrected_miss_items = [f for f in misses
+                            if f.phase_kind != "primary_only"]
     return {
         "labeled": len(labeled),
         "hits": len(hits),
@@ -395,6 +410,19 @@ def click_phase_metrics(flicks: list[Flick]) -> dict:
         "uncorrected_miss_rate": uncorrected_misses / len(labeled),
         "uncorrected_share_of_misses": (
             uncorrected_misses / len(misses) if misses else 0.0),
+        # Concrete click references let every aggregate conclusion be checked
+        # against the trajectory.  Old reports simply lack these optional
+        # lists and continue to render their counts as before.
+        "labeled_clicks": click_indexes(labeled),
+        "hit_clicks": click_indexes(hits),
+        "miss_clicks": click_indexes(misses),
+        "primary_only_hit_clicks": click_indexes(primary_hit_items),
+        "smooth_terminal_hit_clicks": click_indexes(smooth_hit_items),
+        "discrete_adjust_hit_clicks": click_indexes(discrete_hit_items),
+        "repair_chain_hit_clicks": click_indexes(repair_hit_items),
+        "uncorrected_miss_clicks": click_indexes(uncorrected_miss_items),
+        "corrected_miss_clicks": click_indexes(corrected_miss_items),
+        "transition_clicks": click_indexes(transitions),
         "mean_peak_speed_counts_s": float(np.mean(
             [f.peak_speed for f in labeled])),
         "mean_primary_speed_counts_s": (

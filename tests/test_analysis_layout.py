@@ -41,6 +41,7 @@ from kovadapt.gui.analysis_view import (  # noqa: E402
     _TRAVEL_TITLE,
     AnalysisView,
     analysis_zh,
+    moment_text_zh,
     _bias_title,
     _deficit_title,
     _travel_title,
@@ -133,6 +134,11 @@ def test_static_click_phase_metrics_are_visible_and_explicit(qapp, settings):
         "mean_micro_adjust_speed_counts_s": 900.0,
         "mean_brake_ms": 24.0,
         "mean_transition_slowdown": 0.70,
+        "labeled_clicks": list(range(1, 13)),
+        "primary_only_hit_clicks": [1, 2, 4, 6, 8, 10, 12],
+        "smooth_terminal_hit_clicks": [3],
+        "discrete_adjust_hit_clicks": [5, 9],
+        "transition_clicks": [3, 5, 9],
     }
     view = AnalysisView(settings)
     view.show_report(
@@ -144,14 +150,24 @@ def test_static_click_phase_metrics_are_visible_and_explicit(qapp, settings):
     assert view.phase_kpis["acquire"].unit.text() == "°/秒"
     assert view.phase_kpis["slowdown"].value.text() == "70%"
     assert "24 毫秒" in view.phase_kpis["slowdown"].toolTip()
+    assert "第 3、5、9 次点击" in view.phase_kpis["slowdown"].toolTip()
     assert view.phase_kpis["direct"].value.text() == "7"
     assert "70%" in view.phase_kpis["direct"].read.text()
+    assert "第 1、2、4、6、8、10、12 次点击" in view.phase_kpis["direct"].toolTip()
 
     view.show_report(
         _report(n_flicks=12, deg_per_count=0.01, click_phases=phases),
         profile=_profile(archetype="tracking"))
     assert view.phase_box.isHidden()
     view.deleteLater()
+
+
+def test_problem_moment_carries_the_same_click_number_as_replay():
+    moment = {
+        "kind": "unconfirmed_miss", "click_index": 7,
+        "text": "Missed a right flick with no detected terminal-control phase before firing.",
+    }
+    assert moment_text_zh(moment).startswith("第 7 次点击 · ")
 
 
 def test_kpi_strip_reads_the_run_in_mono(qapp, settings):
@@ -940,6 +956,44 @@ def test_replay_path_is_colored_by_instantaneous_speed(qapp, settings):
     assert "速度：慢" in view.replay.legend.text()
     assert "快" in view.replay.legend.text()
     assert "°/秒" in view.replay.legend.text()
+    assert view.replay._timer.timerType() == Qt.PreciseTimer
+    assert view.replay._timer.interval() == 8
+    assert [int(point.data()) for point in view.replay._shots.points()] == [1, 2]
+    view.replay._pos = float(view.replay._click_times[0]) + 0.001
+    view.replay._render(force_slow=True)
+    assert view.replay._active_shot == 0
+    assert "第 1 次点击" in view.replay._shot_label.textItem.toPlainText()
+    view.deleteLater()
+
+
+def test_replay_hot_path_moves_cached_head_without_reuploading_data(
+        qapp, settings, monkeypatch):
+    trace = (TraceBuilder(t0=1000.0)
+             .flick(240, 0, dur=0.20).flick(-240, 0, dur=0.20).build())
+    view = AnalysisView(settings)
+    view.show_report(_report(n_flicks=2), trace=trace)
+    replay = view.replay
+
+    def head_upload_forbidden(*_args, **_kwargs):
+        raise AssertionError("the 125 Hz playhead path called setData()")
+
+    trail_uploads = 0
+    original_trail_set_data = replay._live.setData
+
+    def count_trail_uploads(*args, **kwargs):
+        nonlocal trail_uploads
+        trail_uploads += 1
+        return original_trail_set_data(*args, **kwargs)
+
+    monkeypatch.setattr(replay._head, "setData", head_upload_forbidden)
+    monkeypatch.setattr(replay._live, "setData", count_trail_uploads)
+    for pos in np.linspace(0.0, float(replay._t[-1]), 12):
+        replay._pos = float(pos)
+        replay._render()
+    assert trail_uploads == 0, "the expensive trail entered the playhead hot path"
+
+    replay._render(force_slow=True)
+    assert trail_uploads == 1
     view.deleteLater()
 
 
@@ -1209,6 +1263,7 @@ def test_saved_outcome_report_backfills_new_phase_metrics(qapp, settings):
 
     assert "mean_peak_speed_counts_s" in view.report.click_phases
     assert view.report.click_phases["transition_samples"] == 1
+    assert view.report.click_phases["labeled_clicks"] == [1, 2]
     assert not view.phase_box.isHidden()
     view.deleteLater()
 

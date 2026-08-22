@@ -137,7 +137,7 @@ def one_shot_outcomes(run: Run, trace: MouseTrace,
             labeled[i] = False
         labeled[hit_i] = True
         previous_hit = hit_i
-    return [{"t_click": float(clicks[i]), "hit": hit}
+    return [{"t_click": float(clicks[i]), "hit": hit, "click_index": i + 1}
             for i, hit in sorted(labeled.items())]
 
 

@@ -214,6 +214,18 @@ def analysis_zh(text: str) -> str:
     return text
 
 
+def _click_refs_zh(phases: dict, key: str, limit: int = 12) -> str:
+    """Compact 1-based click references for a conclusion or tooltip."""
+    raw = phases.get(key, []) or []
+    indexes = [int(value) for value in raw
+               if isinstance(value, (int, float)) and int(value) > 0]
+    if not indexes:
+        return ""
+    shown = "、".join(str(value) for value in indexes[:limit])
+    suffix = " 等" if len(indexes) > limit else ""
+    return f"（第 {shown}{suffix} 次点击）"
+
+
 def report_summary_zh(rep: RunReport) -> str:
     """Concise Chinese summary derived from the same report fields."""
     lines = [f"准确率 {rep.accuracy:.0%}，击杀 {rep.kills}，节奏 {rep.kps:.2f} 次/秒。"]
@@ -246,15 +258,22 @@ def report_summary_zh(rep: RunReport) -> str:
     smooth = int(phases.get("smooth_terminal_hits", 0) or 0)
     if labeled:
         lines.append(
-            f"已把 {labeled} 次点击与逐目标结果对齐；其中 {misses} 次未命中，"
-            f"{primary} 次为单峰直接定位命中，{smooth} 次经过平滑末端控制后命中，"
-            f"{raw_misses} 次未检测到末端控制且未命中。")
+            f"已把 {labeled} 次点击与逐目标结果对齐；其中 {misses} 次未命中"
+            f"{_click_refs_zh(phases, 'miss_clicks')}；"
+            f"{primary} 次为单峰直接定位命中"
+            f"{_click_refs_zh(phases, 'primary_only_hit_clicks')}，"
+            f"{smooth} 次经过平滑末端控制后命中"
+            f"{_click_refs_zh(phases, 'smooth_terminal_hit_clicks')}，"
+            f"{raw_misses} 次未检测到末端控制且未命中"
+            f"{_click_refs_zh(phases, 'uncorrected_miss_clicks')}。")
     return " ".join(lines)
 
 
 def moment_text_zh(moment: dict) -> str:
     """Translate a persisted notable-moment sentence without rewriting JSON."""
     text = str(moment.get("text", ""))
+    click_index = int(moment.get("click_index", 0) or 0)
+    prefix = f"第 {click_index} 次点击 · " if click_index > 0 else ""
     dirs = {
         "right": "向右", "up-right": "右上", "up": "向上",
         "up-left": "左上", "left": "向左", "down-left": "左下",
@@ -282,7 +301,7 @@ def moment_text_zh(moment: dict) -> str:
     for pattern, render in patterns:
         match = re.fullmatch(pattern, text)
         if match:
-            return render(match)
+            return prefix + render(match)
     kinds = {
         "overshoot": "过冲片段", "hesitation": "犹豫与连续修正片段",
         "slow_flick": "较慢甩枪片段", "clean_flick": "干净甩枪参考片段",
@@ -291,7 +310,7 @@ def moment_text_zh(moment: dict) -> str:
     # Older reports may contain free-form sentences that predate the known
     # templates.  Preserve those details instead of replacing them with only
     # a generic kind label; use the label solely when the report has no text.
-    return text or kinds.get(str(moment.get("kind", "")), "关键片段")
+    return prefix + (text or kinds.get(str(moment.get("kind", "")), "关键片段"))
 
 # Claim floors. A takeaway has to clear one of these or the chart keeps its
 # neutral title; each is kovadapt's own editorial calibration except the
@@ -1038,9 +1057,10 @@ class AnalysisView(QWidget):
         # Re-derived in memory only — the file on disk is the record of what
         # was measured then, and rewriting it would destroy that.
         self._rederived = False
+        phases = rep.click_phases or {}
         phase_refresh = (self.flicks and rep.shot_outcomes
-                         and "primary_only_hits" not in
-                         (rep.click_phases or {}))
+                         and ("primary_only_hits" not in phases
+                              or "labeled_clicks" not in phases))
         if (self.flicks and self._settings is not None
                 and (rep.flick_floor_deg != MIN_FLICK_DEG or phase_refresh)):
             rep = replace(rep)          # never mutate the caller's report
@@ -1259,7 +1279,8 @@ class AnalysisView(QWidget):
             value if peak_counts > 0 else "—", unit,
             f"{labeled} 次已对齐点击", tone,
             f"快速定位速度统计 {labeled} 次与一击目标结果对齐的点击：{speed_detail}。"
-            "峰值反映爆发速度，阶段平均值同时包含加速和接近目标时的制动。" + warning)
+            "峰值反映爆发速度，阶段平均值同时包含加速和接近目标时的制动。"
+            f"{_click_refs_zh(phases, 'labeled_clicks')}" + warning)
 
         transitions = int(phases.get("transition_samples", 0) or 0)
         slowdown = float(phases.get("mean_transition_slowdown", 0.0) or 0.0)
@@ -1277,7 +1298,8 @@ class AnalysisView(QWidget):
                 f"在 {transitions} 次检测到微调的点击中，从快速定位峰值制动到低速谷值平均用时 "
                 f"{brake_ms:.0f} 毫秒；微调阶段平均速度 {micro}，相对主移动阶段平均{relation} "
                 f"{abs(slowdown):.1%}。明显微调采用 15%/35% 速度滞回；平滑末端控制还会检查"
-                "较浅的二次加速和末端方向偏转。" + warning)
+                "较浅的二次加速和末端方向偏转。"
+                f"{_click_refs_zh(phases, 'transition_clicks')}" + warning)
         else:
             self.phase_kpis["slowdown"].set_value(
                 "—", "速度变化", "没有检测到阶段转换", "dim",
@@ -1294,7 +1316,10 @@ class AnalysisView(QWidget):
         self.phase_kpis["direct"].set_value(
             str(direct), "次命中", f"占已对齐命中的 {direct_rate:.0%}", tone,
             f"{hits} 次已对齐命中里，有 {direct} 次只检测到一个平滑主移动峰"
-            f"（{direct_rate:.1%}）；另有 {smooth} 次平滑末端控制和 {discrete} 次独立微调后命中。"
+            f"（{direct_rate:.1%}）{_click_refs_zh(phases, 'primary_only_hit_clicks')}；"
+            f"另有 {smooth} 次平滑末端控制"
+            f"{_click_refs_zh(phases, 'smooth_terminal_hit_clicks')}和 {discrete} 次独立微调后命中"
+            f"{_click_refs_zh(phases, 'discrete_adjust_hit_clicks')}。"
             "“单峰”只表示原始输入没有出现可靠的次级运动学特征，不声称视频中绝对没有细小修正。"
             + warning)
 
@@ -1500,8 +1525,10 @@ class AnalysisView(QWidget):
         m = self.report.notable[idx]
         self._update_clip_state(idx)
         if self.trace is not None and len(self.trace) > 1:
+            click_index = int(m.get("click_index", 0) or 0)
+            click_prefix = f"第 {click_index} 次点击 · " if click_index > 0 else ""
             self.replay.load(self.trace, m["t_start"], m["t_end"],
-                             label={
+                             label=click_prefix + {
                                  "overshoot": "过冲", "hesitation": "犹豫与连续修正",
                                  "unconfirmed_miss": "未检测到末端控制的点空",
                                  "slow_flick": "较慢甩枪", "clean_flick": "干净甩枪",

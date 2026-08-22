@@ -209,6 +209,7 @@ def test_notable_moments_kinds_and_bounds():
         assert m.t_start < m.t_end
         assert 0.0 <= m.severity <= 1.0
         assert m.text
+        assert m.click_index > 0
 
 
 def test_one_shot_stats_label_misses_and_prevent_a_false_clean_reference():
@@ -234,15 +235,19 @@ def test_one_shot_stats_label_misses_and_prevent_a_false_clean_reference():
     )
     outcomes = one_shot_outcomes(run, trace)
     assert [o["hit"] for o in outcomes] == [True, False, True]
+    assert [o["click_index"] for o in outcomes] == [1, 2, 3]
 
     flicks = segment_flicks(trace)
     apply_shot_outcomes(flicks, outcomes)
     phases = click_phase_metrics(flicks)
     assert phases["hits"] == 2 and phases["misses"] == 1
     assert phases["uncorrected_misses"] == 1
+    assert phases["hit_clicks"] == [1, 3]
+    assert phases["uncorrected_miss_clicks"] == [2]
 
     moments = find_notable_moments(flicks)
-    assert any(m.kind == "unconfirmed_miss" for m in moments)
+    assert any(m.kind == "unconfirmed_miss" and m.click_index == 2
+               for m in moments)
     clean = [m for m in moments if m.kind == "clean_flick"]
     assert clean and "180-count left" not in clean[0].text
 
