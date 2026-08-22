@@ -38,6 +38,10 @@ class Flick:
     time_to_peak: float
     overshoot: float        # fraction of amplitude, >= 0
     corrections: int
+    # Linked from KovaaK's per-kill shot counts when the scenario exposes a
+    # one-hit acquisition.  None means the stats could not safely identify
+    # this click; False is a real miss, not a low-quality heuristic.
+    hit: bool | None = None
 
     @property
     def horizontal(self) -> str:
@@ -225,6 +229,68 @@ def directional_bias(flicks: list[Flick]) -> dict:
     return {"left": left, "right": right, "vertical": vertical, "bias_score": score}
 
 
+def apply_shot_outcomes(flicks: list[Flick], outcomes: list[dict],
+                        tolerance: float = 0.010) -> None:
+    """Stamp known per-click hit results onto segmented flicks.
+
+    Both timestamps originate in the Raw Input trace, so this is normally an
+    exact match.  The small tolerance keeps old JSON round-trips and float
+    formatting from silently dropping a label; it is far shorter than any
+    plausible interval between deliberate static-click shots.
+    """
+    known = sorted(
+        ((float(o["t_click"]), bool(o["hit"])) for o in outcomes
+         if "t_click" in o and "hit" in o),
+        key=lambda item: item[0],
+    )
+    if not known:
+        return
+    times = np.asarray([item[0] for item in known], dtype=np.float64)
+    for flick in flicks:
+        i = int(np.searchsorted(times, flick.t_click))
+        candidates = [j for j in (i - 1, i) if 0 <= j < len(known)]
+        if not candidates:
+            continue
+        best = min(candidates, key=lambda j: abs(known[j][0] - flick.t_click))
+        if abs(known[best][0] - flick.t_click) <= tolerance:
+            flick.hit = known[best][1]
+
+
+def click_phase_metrics(flicks: list[Flick]) -> dict:
+    """Outcome-aware static-click technique digest.
+
+    This deliberately describes what the trace proves, not target geometry it
+    cannot see.  In particular, ``uncorrected_miss`` means the player fired a
+    shot KovaaK's marked as a miss without a detectable corrective
+    submovement after peak speed.  It does not pretend to know the target's
+    pixel-space centre.
+    """
+    labeled = [f for f in flicks if f.hit is not None]
+    if not labeled:
+        return {}
+    hits = [f for f in labeled if f.hit]
+    misses = [f for f in labeled if not f.hit]
+    direct_hits = sum(f.corrections == 0 for f in hits)
+    corrected_hits = sum(f.corrections == 1 for f in hits)
+    repair_hits = sum(f.corrections >= 2 for f in hits)
+    uncorrected_misses = sum(f.corrections == 0 for f in misses)
+    corrected_misses = len(misses) - uncorrected_misses
+    return {
+        "labeled": len(labeled),
+        "hits": len(hits),
+        "misses": len(misses),
+        "linked_hit_rate": len(hits) / len(labeled),
+        "direct_hits": direct_hits,
+        "corrected_hits": corrected_hits,
+        "repair_chain_hits": repair_hits,
+        "uncorrected_misses": uncorrected_misses,
+        "corrected_misses": corrected_misses,
+        "uncorrected_miss_rate": uncorrected_misses / len(labeled),
+        "uncorrected_share_of_misses": (
+            uncorrected_misses / len(misses) if misses else 0.0),
+    }
+
+
 def region_deficits(flicks: list[Flick], cols: int = 3, rows: int = 3) -> dict[str, float]:
     """Per-region weakness signal from real flick data.
 
@@ -259,8 +325,15 @@ def region_deficits(flicks: list[Flick], cols: int = 3, rows: int = 3) -> dict[s
         c = int(np.clip(round(center_c + (ux / m) * ring * center_c), 0, cols - 1))
         r = int(np.clip(round(center_r + (uy / m) * ring * center_r), 0, rows - 1))
         slowness = max(f.duration / med_dur - 1.0, 0.0) if med_dur > 0 else 0.0
+        # A known miss is direct outcome evidence.  Without this term a shot
+        # fired off-target with zero correction scored as a perfect movement
+        # and taught the region bandit that the missed area was a strength.
+        # 0.50 is an editorial calibration: large enough to survive the
+        # within-run z-score, smaller than a severe overshoot/repair chain.
+        miss_penalty = 0.50 if f.hit is False else 0.0
         buckets.setdefault(f"r{r}c{c}", []).append(
             f.overshoot + 0.15 * f.corrections + 0.25 * slowness
+            + miss_penalty
         )
     means = {k: float(np.mean(v)) for k, v in buckets.items() if len(v) >= 2}
     if not means:

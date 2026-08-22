@@ -10,15 +10,19 @@ import pytest
 from kovadapt.analysis.movement import (
     MIN_FLICK_DEG,
     YAW_DEG_PER_COUNT,
+    apply_shot_outcomes,
+    click_phase_metrics,
     directional_bias,
     movement_heatmap,
     region_deficits,
     segment_flicks,
 )
 from kovadapt.analysis.notable import find_notable_moments
-from kovadapt.analysis.report import RunReport, build_report, run_time_window
+from kovadapt.analysis.report import (RunReport, build_report,
+                                      one_shot_outcomes, run_time_window)
 from kovadapt.profile.player import PlayerProfile
 from kovadapt.stats.parser import parse_stats_csv
+from kovadapt.stats.models import KillEvent, Run
 from kovadapt.telemetry.trace import MouseTrace, ResampleCache, TraceStore
 
 RATE = 1000.0  # synthetic packet rate (Hz)
@@ -173,6 +177,19 @@ def test_region_deficits_weak_side_scores_higher():
     assert defs[left_key] > defs[right_key]
 
 
+def test_known_misses_feed_the_region_bandit_even_without_corrections():
+    b = TraceBuilder()
+    for _ in range(3):
+        b.flick(220, 0)
+        b.flick(-220, 0)
+    flicks = segment_flicks(b.build())
+    for flick in flicks:
+        flick.hit = flick.horizontal == "left"  # clean rightward clicks missed
+    defs = region_deficits(flicks)
+    assert defs["r1c2"] > defs["r1c0"], (
+        "zero-correction misses were still teaching the bandit that region was strong")
+
+
 def test_movement_heatmap_shape():
     heat, xe, ye = movement_heatmap(_biased_trace(), bins=32)
     assert heat.shape == (32, 32) and heat.sum() > 0
@@ -192,6 +209,42 @@ def test_notable_moments_kinds_and_bounds():
         assert m.t_start < m.t_end
         assert 0.0 <= m.severity <= 1.0
         assert m.text
+
+
+def test_one_shot_stats_label_misses_and_prevent_a_false_clean_reference():
+    """The per-target row says the second target took two shots. The Raw
+    Input click nearest its kill timestamp is the hit; the prior click is the
+    miss. A zero-correction miss must become a review moment, never the clean
+    benchmark it was before outcomes were linked."""
+    b = TraceBuilder(t0=datetime(2026, 8, 22, 12, 0, 0).timestamp())
+    b.flick(180, 0).flick(-180, 0).flick(180, 0)
+    trace = b.build()
+
+    def event(index: int, click_i: int, shots: int) -> KillEvent:
+        stamp = datetime.fromtimestamp(float(trace.clicks[click_i]))
+        return KillEvent(
+            index=index, timestamp=stamp.strftime("%H:%M:%S.%f"), t=float(index),
+            bot="target", weapon="BB Gun", ttk=0.0, shots=shots, hits=1,
+            accuracy=1.0 / shots, cheated=False, overshots=0,
+        )
+
+    run = Run(
+        scenario="static", started=datetime.fromtimestamp(float(trace.clicks[-1]) + 1.0),
+        kills=[event(1, 0, 1), event(2, 2, 2)],
+    )
+    outcomes = one_shot_outcomes(run, trace)
+    assert [o["hit"] for o in outcomes] == [True, False, True]
+
+    flicks = segment_flicks(trace)
+    apply_shot_outcomes(flicks, outcomes)
+    phases = click_phase_metrics(flicks)
+    assert phases["hits"] == 2 and phases["misses"] == 1
+    assert phases["uncorrected_misses"] == 1
+
+    moments = find_notable_moments(flicks)
+    assert any(m.kind == "unconfirmed_miss" for m in moments)
+    clean = [m for m in moments if m.kind == "clean_flick"]
+    assert clean and "180-count left" not in clean[0].text
 
 
 # ----------------------------------------------------------------- run report

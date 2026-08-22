@@ -334,7 +334,10 @@ class SessionWatcher:
             fitts_slope_ms=rep.fitts_slope_ms or None,
         )
         fatigue = rep.fatigue.get("score", 0.0) if self.s.fatigue_easing else 0.0
-        plan = self.engine.plan(profile, run, fatigue=fatigue, capability=cap)
+        plan = self.engine.plan(
+            profile, run, fatigue=fatigue, capability=cap,
+            click_phases=rep.click_phases,
+        )
         out = generate_adaptive_variant(
             self.base_sce_path(), plan, self.s, self.adaptive_sce_path()
         )

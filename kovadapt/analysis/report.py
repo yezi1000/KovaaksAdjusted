@@ -11,7 +11,8 @@ import numpy as np
 
 from ..stats.models import Run
 from ..telemetry.trace import MouseTrace, ResampleCache
-from .movement import (segment_flicks, directional_bias, region_deficits,
+from .movement import (apply_shot_outcomes, click_phase_metrics,
+                       segment_flicks, directional_bias, region_deficits,
                        movement_heatmap, MIN_FLICK_DEG, YAW_DEG_PER_COUNT)
 from .notable import find_notable_moments
 
@@ -52,6 +53,19 @@ def input_degraded(rep) -> bool:
     return jitter > JITTER_BAD_MS or (0.0 < polling < POLLING_LOW_HZ)
 
 
+def _clock_epoch(run: Run, hhmmss: str) -> float:
+    """A KovaaK's wall-clock timestamp placed on this run's real date."""
+    day = datetime(run.started.year, run.started.month, run.started.day)
+    h, m, s = hhmmss.split(":")
+    value = (day + timedelta(hours=int(h), minutes=int(m),
+                             seconds=float(s))).timestamp()
+    # The filename timestamp is the challenge END and truncates milliseconds.
+    # A clock much later than it belongs to the previous day (midnight run).
+    if value > run.started.timestamp() + 5.0:
+        value -= 86400.0
+    return value
+
+
 def run_time_window(run: Run) -> tuple[float, float] | None:
     """Epoch (start, end) of the run, reconstructed from the stats file's
     wall-clock kill timestamps.
@@ -71,31 +85,60 @@ def run_time_window(run: Run) -> tuple[float, float] | None:
     # was made.
     if not run.kills and not start_str:
         return None
-    day = datetime(run.started.year, run.started.month, run.started.day)
     end_epoch = run.started.timestamp()
 
-    def to_epoch(hhmmss: str) -> float:
-        h, m, s = hhmmss.split(":")
-        t = (day + timedelta(hours=int(h), minutes=int(m), seconds=float(s))).timestamp()
-        # The filename timestamp truncates milliseconds, so a same-day time
-        # can nominally exceed end_epoch by <1s; anything further ahead of
-        # the run's end must be pre-midnight -> previous day.
-        if t > end_epoch + 5.0:
-            t -= 86400.0
-        return t
-
     if start_str:
-        t0 = to_epoch(start_str)
+        t0 = _clock_epoch(run, start_str)
     else:
         # Older stats files lack "Challenge Start:" — reconstruct from the
         # first kill (its TTK covers the time since that target appeared).
-        t0 = to_epoch(run.kills[0].timestamp) - max(run.kills[0].ttk, 0.0) - 1.0
+        t0 = _clock_epoch(run, run.kills[0].timestamp) \
+            - max(run.kills[0].ttk, 0.0) - 1.0
     # With kills, the last one plus follow-through; without, the challenge
     # end from the filename, which is what run.started already is.
-    t1 = (to_epoch(run.kills[-1].timestamp) + 2.0) if run.kills else end_epoch
+    t1 = (_clock_epoch(run, run.kills[-1].timestamp) + 2.0) \
+        if run.kills else end_epoch
     if t1 < t0:  # crossed midnight
         t1 += 86400.0
     return t0, t1
+
+
+def one_shot_outcomes(run: Run, trace: MouseTrace,
+                      tolerance: float = 0.120) -> list[dict]:
+    """Link one-hit KovaaK's acquisitions to Raw Input click timestamps.
+
+    Each per-kill CSV row states how many shots were used to acquire that
+    target and the wall-clock time of the killing hit.  For rows with exactly
+    one hit, the click nearest that timestamp is the hit and the immediately
+    preceding ``shots - 1`` clicks are misses.  Multi-hit targets are skipped:
+    their row does not expose which earlier clicks dealt damage, and guessing
+    would turn tracking/switching data into false static-click labels.
+    """
+    clicks = np.asarray(trace.clicks, dtype=np.float64)
+    if clicks.size == 0 or not run.kills:
+        return []
+    labeled: dict[int, bool] = {}
+    previous_hit = -1
+    for kill in run.kills:
+        if kill.hits != 1 or kill.shots < 1:
+            continue
+        event_t = _clock_epoch(run, kill.timestamp)
+        at = int(np.searchsorted(clicks, event_t))
+        candidates = [i for i in (at - 1, at) if previous_hit < i < clicks.size]
+        if not candidates:
+            continue
+        hit_i = min(candidates, key=lambda i: abs(float(clicks[i]) - event_t))
+        if abs(float(clicks[hit_i]) - event_t) > tolerance:
+            continue
+        first_i = hit_i - kill.shots + 1
+        if first_i <= previous_hit or first_i < 0:
+            continue
+        for i in range(first_i, hit_i):
+            labeled[i] = False
+        labeled[hit_i] = True
+        previous_hit = hit_i
+    return [{"t_click": float(clicks[i]), "hit": hit}
+            for i, hit in sorted(labeled.items())]
 
 
 @dataclass
@@ -148,6 +191,11 @@ class RunReport:
     clip_files: dict = field(default_factory=dict)   # notable idx -> mp4 path
     fatigue: dict = field(default_factory=dict)      # session FatigueState snapshot
     input_health: dict = field(default_factory=dict)  # polling/jitter/click-hold
+    # Per-click outcomes inferred only from one-hit acquisition rows. Keeping
+    # the Raw Input timestamps lets a saved report reapply them when its trace
+    # is re-segmented under a newer flick-amplitude floor.
+    shot_outcomes: list[dict] = field(default_factory=list)
+    click_phases: dict = field(default_factory=dict)
     # Neural flick-score digest (ml/infer.py:summarize), stamped by the
     # watcher when a trained checkpoint exists. analysis/ itself never
     # imports kovadapt.ml — it stays a pure leaf; ml is built ON analysis.
@@ -258,6 +306,15 @@ def _summary_text(rep: "RunReport", flicks_exist: bool) -> str:
         lines.append(f"{rep.overshoot_rate:.0%} of flicks overshot — consider a slight sens decrease or larger targets; the engine will compensate.")
     if rep.mean_flick_ms > 0:
         lines.append(f"Mean flick {rep.mean_flick_ms:.0f}ms.")
+    phases = rep.click_phases or {}
+    labeled = int(phases.get("labeled", 0) or 0)
+    if labeled:
+        misses = int(phases.get("misses", 0) or 0)
+        raw_misses = int(phases.get("uncorrected_misses", 0) or 0)
+        lines.append(
+            f"Matched {labeled} clicks to one-hit target outcomes: {misses} "
+            f"misses, including {raw_misses} fired without a detectable "
+            "corrective submovement.")
     ih = rep.input_health or {}
     # `or 0.0`: a report carrying a null polling value used to raise TypeError
     # here rather than simply skipping the note.
@@ -292,6 +349,7 @@ def apply_flick_metrics(rep: "RunReport", flicks: list, *,
     rep.bias = directional_bias(flicks)
     rep.region_deficits = region_deficits(flicks, cols=cols, rows=rows)
     rep.notable = [asdict(m) for m in find_notable_moments(flicks)]
+    rep.click_phases = click_phase_metrics(flicks)
     # Reset rather than leave stale: re-deriving a report with FEWER flicks
     # must not keep the old mean beside the new count.
     rep.mean_flick_ms = rep.overshoot_rate = rep.mean_corrections = 0.0
@@ -373,6 +431,8 @@ def build_report(
             flick_floor_deg = MIN_FLICK_DEG
         flicks = segment_flicks(rt, grid=grid, **(
             {} if min_amplitude is None else {"min_amplitude": min_amplitude}))
+        rep.shot_outcomes = one_shot_outcomes(run, rt)
+        apply_shot_outcomes(flicks, rep.shot_outcomes)
         # The angle cannot be recovered from the count here: the caller divided
         # by the player's sens to get it, and this function is not given sens.
         # So the caller that converted states what it converted FROM, and a

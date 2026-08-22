@@ -684,6 +684,45 @@ DIAGNOSTICS: dict[str, dict] = {
             ),
         ),
     },
+    "dx-static-unconfirmed-miss": {
+        "signal": "one-shot outcome + corrective-submovement count",
+        "condition": (
+            "archetype == clicking AND at least 8 clicks are matched to one-hit targets AND "
+            "at least 2 misses occurred AND >= 50% of misses were fired without a detectable "
+            "corrective submovement (numeric cutoffs are editorial calibration)"
+        ),
+        "interpretation": (
+            "The primary movement ended in a shot that KovaaK's marked as a miss, without the "
+            "optional homing correction expected when the initial landing is not trustworthy. "
+            "This is different from a clean direct hit: outcome linking prevents the same "
+            "zero-correction trace shape from being praised merely because it looked smooth."
+        ),
+        "prescription": (
+            "Use a fast but controlled primary movement, decelerate as the crosshair approaches, "
+            "and confirm the target before clicking. When the first landing is short, finish with "
+            "one small correction rather than firing immediately or throwing a second large "
+            "flick. Add speed only after this sequence is consistently accurate."
+        ),
+        "confidence": "high (outcome), medium (cause)",
+        "sources": (
+            (
+                "https://blog.voltaic.gg/announcing-the-voltaic-season-5-aiming-benchmarks-beta-"
+                "for-kovaaks/ (Voltaic: smoothly flick and micro-adjust when necessary)"
+            ),
+            (
+                "https://aimlabs.com/articles/aimlabs/introducing-the-calm-aim-youtube-routine/ "
+                "(Aimlabs: slow the approach, adjust, confirm, then build speed)"
+            ),
+            (
+                "https://pubmed.ncbi.nlm.nih.gov/26731344/ (Hoffmann 2016: primary and corrective "
+                "submovements in aimed movement)"
+            ),
+            (
+                "https://pubmed.ncbi.nlm.nih.gov/15064195/ (Abrams & Pratt 1993: practice reduces "
+                "time in final corrective submovements)"
+            ),
+        ),
+    },
     "dx-overshoot-control": {
         "signal": "overshoot_rate + corrections",
         "condition": (

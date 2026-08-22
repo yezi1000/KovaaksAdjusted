@@ -54,6 +54,26 @@ def test_overshoot_control_failure_fires():
     assert "dx-overshoot-strategic" not in ids(got)
 
 
+def test_static_clicks_fired_without_needed_correction_get_their_own_card():
+    rep = make_rep(click_phases={
+        "labeled": 20, "hits": 16, "misses": 4,
+        "uncorrected_misses": 3, "corrected_misses": 1,
+        "uncorrected_share_of_misses": 0.75,
+    })
+    got = generate_insights(rep, make_prof(history=hist()), settings())
+    (card,) = [i for i in got if i.id == "dx-static-unconfirmed-miss"]
+    assert "3 of 4" in card.reasoning and "75%" in card.reasoning
+    assert card.sources and card.severity == "attention"
+
+    # Outcome linking alone is not enough when the correction trace is noisy.
+    noisy = make_rep(
+        click_phases=rep.click_phases,
+        input_health={"polling_hz_est": 1000.0, "jitter_ms": 5.0},
+    )
+    assert "dx-static-unconfirmed-miss" not in ids(
+        generate_insights(noisy, make_prof(history=hist()), settings()))
+
+
 def test_overshoot_strategic_is_positive_not_a_fix():
     rep = make_rep(overshoot_rate=0.45, mean_corrections=0.5, accuracy=0.90)
     prof = make_prof(history=hist())

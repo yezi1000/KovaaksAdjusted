@@ -49,7 +49,8 @@ from ..analysis.insights import (
     _region_words,
     generate_insights,
 )
-from ..analysis.movement import MIN_FLICK_DEG, movement_heatmap, segment_flicks
+from ..analysis.movement import (MIN_FLICK_DEG, apply_shot_outcomes,
+                                 movement_heatmap, segment_flicks)
 from ..analysis.report import (
     RunReport,
     apply_flick_metrics,
@@ -236,6 +237,14 @@ def report_summary_zh(rep: RunReport) -> str:
             lines.append(f"{rep.overshoot_rate:.0%} 的甩枪出现过冲，可结合下方修正次数判断原因。")
     if rep.mean_flick_ms > 0:
         lines.append(f"平均甩枪时间 {rep.mean_flick_ms:.0f} 毫秒。")
+    phases = rep.click_phases or {}
+    labeled = int(phases.get("labeled", 0) or 0)
+    misses = int(phases.get("misses", 0) or 0)
+    raw_misses = int(phases.get("uncorrected_misses", 0) or 0)
+    if labeled:
+        lines.append(
+            f"已把 {labeled} 次点击与逐目标结果对齐；其中 {misses} 次未命中，"
+            f"{raw_misses} 次是在没有检测到修正动作时直接击发。")
     return " ".join(lines)
 
 
@@ -262,6 +271,9 @@ def moment_text_zh(moment: dict) -> str:
          lambda m: (f"参考动作：一次干净的 {m.group(1)} 计数"
                     f"{dirs.get(m.group(2), m.group(2))}甩枪，耗时 {m.group(3)} 毫秒，"
                     "没有过冲；可将它作为本局基准。")),
+        (r"Missed a ([a-z-]+) flick without a corrective submovement before firing\.",
+         lambda m: (f"一次{dirs.get(m.group(1), m.group(1))}甩枪在没有进行修正动作时"
+                    "直接击发并未命中。")),
     )
     for pattern, render in patterns:
         match = re.fullmatch(pattern, text)
@@ -270,6 +282,7 @@ def moment_text_zh(moment: dict) -> str:
     kinds = {
         "overshoot": "过冲片段", "hesitation": "犹豫与连续修正片段",
         "slow_flick": "较慢甩枪片段", "clean_flick": "干净甩枪参考片段",
+        "unconfirmed_miss": "无修正直接点空片段",
     }
     # Older reports may contain free-form sentences that predate the known
     # templates.  Preserve those details instead of replacing them with only
@@ -328,6 +341,12 @@ def localized_insight(ins: Insight) -> tuple[str, str, str, str, str]:
             "过冲后进行了多次修正",
             "甩枪经常越过目标，随后又通过连续小动作回拉，说明主要问题更接近制动与控制。",
             "练习一次甩枪后只做一次小幅修正，减少反复拉扯。"),
+        "dx-static-unconfirmed-miss": (
+            "需要修正时却直接击发",
+            "逐目标结果表明，多次未命中发生在首次甩枪之后、尚未检测到修正动作之前；"
+            "这与一次到位的直接命中不同。",
+            "先做快速但可控的首次定位，接近目标时减速；不确定时完成一次小幅修正并确认后再点击，"
+            "稳定命中后再逐步提高节奏。"),
         "dx-overshoot-strategic": (
             "过冲但几乎不修正，可能是主动速度策略",
             "在准确率仍位于区间内时，过冲而不反复回拉可能来自速度任务中的扫过式击发。",
@@ -662,6 +681,7 @@ def _trend_title(accs: list[float]) -> str:
 def _kind_color(kind: str) -> str:
     pal = theme.current()
     return {"overshoot": pal.bad, "hesitation": pal.bad,
+            "unconfirmed_miss": pal.bad,
             "slow_flick": pal.warn, "clean_flick": pal.good}.get(kind, pal.accent)
 
 
@@ -983,6 +1003,7 @@ class AnalysisView(QWidget):
                  else min_flick_counts(self._settings))
         self.flicks = (segment_flicks(self.trace, min_amplitude=floor)
                        if self.trace is not None and len(self.trace) > 10 else [])
+        apply_shot_outcomes(self.flicks, rep.shot_outcomes)
         # ...and when the SAVED numbers came from a different floor, that is
         # exactly what happens: the file says one thing about a run and the
         # overlay draws another. This report was written at 0.33 degrees,
@@ -1165,6 +1186,14 @@ class AnalysisView(QWidget):
             why = (f"{n} 次甩枪的平均时间为 {rep.mean_flick_ms:.0f} 毫秒，但本局输入时序"
                    "噪声过大，无法可靠读取甩枪微观结构，因此页面不会给出过冲或方向结论；"
                    "甩枪用时本身仍然有效。")
+        phases = rep.click_phases or {}
+        if int(phases.get("labeled", 0) or 0):
+            why += (
+                f" 已对齐 {int(phases.get('labeled', 0))} 次逐目标点击："
+                f"直接命中 {int(phases.get('direct_hits', 0))} 次，"
+                f"一次修正后命中 {int(phases.get('corrected_hits', 0))} 次，"
+                f"连续修正后命中 {int(phases.get('repair_chain_hits', 0))} 次，"
+                f"无修正直接点空 {int(phases.get('uncorrected_misses', 0))} 次。")
         self.kpis["flick"].set_value(
             f"{rep.mean_flick_ms:.0f}" if rep.mean_flick_ms > 0 else "—", "ms",
             read, tone, why)
@@ -1374,6 +1403,7 @@ class AnalysisView(QWidget):
             self.replay.load(self.trace, m["t_start"], m["t_end"],
                              label={
                                  "overshoot": "过冲", "hesitation": "犹豫与连续修正",
+                                 "unconfirmed_miss": "无修正直接点空",
                                  "slow_flick": "较慢甩枪", "clean_flick": "干净甩枪",
                              }.get(m["kind"], "关键片段"),
                              flicks=self.flicks)

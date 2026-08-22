@@ -104,6 +104,41 @@ def test_engine_plan_structure(fixtures):
     assert prof.last_focus == plan.focus_region
 
 
+def test_unconfirmed_static_misses_block_the_optional_fitts_shrink(fixtures):
+    """Accuracy is already in band, so shrinking is a speed-progression step,
+    not recovery. Do not make the target smaller while the outcome-linked
+    trace says the player is skipping the correction/confirmation phase."""
+    s = _settings()
+    engine = AdaptationEngine(s, rng=np.random.default_rng(7))
+    run = parse_stats_csv(fixtures / "sample_stats.csv")
+    run.summary["Hit Count:"] = "90"
+    run.summary["Miss Count:"] = "10"
+
+    def profile() -> PlayerProfile:
+        p = PlayerProfile(scenario="t")
+        p.fitts_obs = 6
+        p.ewma_fitts_ms = p.slow_fitts_ms = 300.0
+        return p
+
+    clean = profile()
+    engine.plan(clean, run)
+    assert clean.target_scale < 1.0, "the ordinary Fitts progression vanished"
+
+    blocked = profile()
+    engine.plan(blocked, run, click_phases={
+        "misses": 4, "uncorrected_share_of_misses": 0.75,
+    })
+    assert blocked.target_scale == pytest.approx(1.0)
+
+    switching = profile()
+    switching.archetype = "switching"
+    engine.plan(switching, run, click_phases={
+        "misses": 4, "uncorrected_share_of_misses": 0.75,
+    })
+    assert switching.target_scale < 1.0, (
+        "the static-click technique gate leaked into target switching")
+
+
 def test_profile_roundtrip(tmp_path, fixtures):
     prof = PlayerProfile(scenario="rt test")
     run = parse_stats_csv(fixtures / "sample_stats.csv")

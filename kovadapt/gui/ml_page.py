@@ -434,20 +434,17 @@ _GOVERNOR = (
 )
 
 _FLICK = (
-    "Outcomes conflate distinct failures, which is why the model refuses to reason from "
-    "the stats file alone: a miss may be a badly aimed flick or a well-aimed flick that "
-    "arrived too slowly, and accuracy cannot tell the two apart. Telemetry can, because "
-    "a flick has anatomy. The standard motor-control decomposition — validated on "
-    "professional FPS players — splits every aimed movement into a primary ballistic "
-    "phase that lands long (overshoot) or short, followed by corrective submovements "
-    "that settle onto the target; kovadapt's per-flick overshoot and correction counts "
-    "are that decomposition, measured from Raw Input deltas exactly as the game receives "
-    "them. The distinction matters because it reverses verdicts: overshoot with the shot "
-    "fired mid-movement and at most one correction is a <i>swipe</i> — a timing strategy "
-    "skilled players deliberately adopt on speed tasks — while the same overshoot "
-    "followed by a chain of corrections is a control failure. One number, two opposite "
-    "coaching decisions: only the microstructure separates them, which is precisely why "
-    "the model demands it."
+    "Static clicking is read as a sequence, not one accuracy number. For one-hit targets, "
+    "kovadapt matches KovaaK's per-target shot count and kill time to the Raw Input click "
+    "stream, then classifies the linked attempts as a direct hit, a one-correction hit, a "
+    "multi-correction repair, or a miss fired without a detectable corrective submovement. "
+    "The standard motor-control decomposition splits aiming into a primary ballistic phase "
+    "followed, when needed, by corrective submovements; the training policy therefore asks "
+    "for a clean acquisition, one deliberate correction when the landing is not confirmed, "
+    "and speed only after accuracy is stable. Known misses also count against their spatial "
+    "region, so a zero-correction miss is never praised as a clean flick. The boundary is "
+    "explicit: Raw Input has no target-centre pixels, so kovadapt can prove whether a linked "
+    "shot hit and whether correction occurred, but not the exact pixel error at landing."
 )
 
 _BANDIT = (
@@ -483,8 +480,10 @@ _FITTS = (
     "the fast one stops undercutting the slow one while accuracy sits comfortably in its "
     "band — throughput stalled, comfort intact — the engine adds one extra gentle shrink "
     "per run, about 1.75 percent at the default gain, pushing the task back toward the "
-    "challenge point. Diagnosis and control are not separate systems here but subsequent "
-    "uses of the same measurement."
+    "challenge point. That optional shrink is held when outcome-linked evidence shows that "
+    "most misses were fired without correction: technique is restored before target size "
+    "rewards rushed confirmation. Diagnosis and control are subsequent uses of the same "
+    "measurement."
 )
 
 _MOVEMENT = (
@@ -548,10 +547,13 @@ _GOVERNOR_ZH = (
     "控制规律外推的独立区间，界面会明确标注这一点。"
 )
 _FLICK_ZH = (
-    "单看结果无法区分不同问题：一次未命中既可能是甩枪方向错误，也可能是方向正确但到达太慢。"
-    "因此模型会读取原始鼠标输入，把瞄准动作分成主要的快速移动和之后的修正子动作，并分别测量"
-    "过冲与修正次数。过冲后立即开火、几乎不修正，可能是速度任务中的主动扫过策略；过冲后连续"
-    "多次回拉，则更像控制问题。相同的命中结果可能需要完全不同的训练建议，鼠标轨迹负责区分它们。"
+    "静态点击不能只看总准确率，而要看每次动作的过程。对一击死亡的目标，kovadapt 会把 KovaaK's "
+    "记录的逐目标开枪数和击杀时间，与原始输入中的点击对应起来，再区分为：一次定位直接命中、"
+    "一次微调后命中、多次补救后命中，以及没有做出可检测微调就点空。运动控制中的瞄准动作通常"
+    "包含主要的快速移动，以及在需要时完成确认的修正子动作；因此训练顺序改为先做干净的一次定位，"
+    "落点不确定时只做一次有意识微调，准确率稳定后再提高速度。已确认的点空也会计入对应区域的弱项，"
+    "不会再被误夸成“干净甩枪”。能力边界同样明确：原始输入不包含目标中心像素，所以系统能判断"
+    "对应点击是否命中、是否发生微调，但不能声称准星落点距离目标中心多少像素。"
 )
 _BANDIT_ZH = (
     "弱项具有空间位置。每次甩枪会被映射到墙面上的 5×5 网格：方向决定方位，幅度决定离中心的"
@@ -564,7 +566,8 @@ _FITTS_ZH = (
     "MT = a + b·ID，其中 ID = log<sub>2</sub>(D/W + 1)。目标越小、距离越远，动作所需时间越长；"
     "斜率 b 表示每增加一比特难度所付出的毫秒数。kovadapt 在每局内拟合这一斜率，并观察跨局变化。"
     "即使总分持平，只要毫秒/比特持续下降，也表示真实的运动效率提升；当准确率舒适但吞吐量停止"
-    "改善时，控制器会额外小幅提高难度。"
+    "改善时，控制器会额外小幅缩小目标。若对应到原始输入的证据表明，大多数失误都是没有微调就"
+    "直接点空，这个额外缩小步骤会暂停：先恢复落点确认习惯，再用更小目标追求速度。"
 )
 _MOVEMENT_ZH = (
     "固定不变的训练容易让人记住节奏。目标微移动由 Ornstein–Uhlenbeck 均值回归随机过程驱动："

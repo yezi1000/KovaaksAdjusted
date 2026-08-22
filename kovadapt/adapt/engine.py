@@ -172,10 +172,16 @@ class AdaptationEngine:
         last_run: Run | None = None,
         fatigue: float = 0.0,
         capability=None,
+        click_phases: dict | None = None,
     ) -> AdaptationPlan:
         """fatigue in [0, 1] eases the EMITTED plan only (bigger targets,
         calmer movement); the persisted profile state stays un-eased so
         recovery next session resumes from the true difficulty.
+
+        `click_phases` is the outcome-linked static-click digest. A high share
+        of misses fired without a corrective submovement blocks the optional
+        Fitts shrink step: making the target smaller while the player is
+        skipping the homing/confirmation phase rewards the wrong bottleneck.
 
         `capability` is the scenario's `scenario.capability.Capability`
         when the caller has read the file. Given one, the plan records
@@ -189,6 +195,14 @@ class AdaptationEngine:
 
         # -- 1. size controller (multiplicative, log-space) ----------------
         scale = profile.target_scale
+        phase = click_phases or {}
+        technique_block = (
+            profile.archetype in ("", "clicking")
+            and
+            int(phase.get("misses", 0) or 0) >= 2
+            and float(phase.get("uncorrected_share_of_misses", 0.0) or 0.0)
+            >= 0.50
+        )
         if last_run is not None and (last_run.hit_count + last_run.miss_count) >= s.min_shots_for_size:
             acc = last_run.accuracy
             mid = 0.5 * (s.target_accuracy_low + s.target_accuracy_high)
@@ -225,7 +239,8 @@ class AdaptationEngine:
                 # where the evidence is real but wildly unrepresentative.
                 step = math.exp(-gain * excess)
                 scale *= min(max(step, _MIN_SIZE_STEP), _MAX_SIZE_STEP)
-            elif (s.fitts_control_gain > 0 and profile.fitts_obs >= 5
+            elif (not technique_block
+                  and s.fitts_control_gain > 0 and profile.fitts_obs >= 5
                   and profile.ewma_fitts_ms >= profile.slow_fitts_ms):
                 # Fitts throughput sub-controller: comfortable in the band but
                 # ms-per-bit has stalled -> one extra gentle shrink step per

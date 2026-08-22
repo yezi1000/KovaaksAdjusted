@@ -38,6 +38,9 @@ _JITTER_BAD_MS = JITTER_BAD_MS
 _POLLING_LOW_HZ = POLLING_LOW_HZ
 _MIN_FLICKS = 8              # too few flicks = no microstructure claims
 _CROSS_SESSION_MIN_RUNS = 15  # runs before a cross-session progress claim
+_STATIC_PHASE_MIN_CLICKS = 8
+_STATIC_PHASE_MIN_MISSES = 2
+_UNCONFIRMED_MISS_SHARE = 0.50
 
 
 @dataclass(frozen=True)
@@ -129,6 +132,23 @@ def generate_insights(
     # ---- overshoot: control failure vs deliberate speed ------------------
     if has_flicks and not input_bad:
         in_band = lo <= rep.accuracy <= hi
+        phases = rep.click_phases or {}
+        labeled = int(phases.get("labeled", 0) or 0)
+        misses = int(phases.get("misses", 0) or 0)
+        unconfirmed = int(phases.get("uncorrected_misses", 0) or 0)
+        miss_share = float(phases.get("uncorrected_share_of_misses", 0.0) or 0.0)
+        if (arche == "clicking" and labeled >= _STATIC_PHASE_MIN_CLICKS
+                and misses >= _STATIC_PHASE_MIN_MISSES
+                and miss_share >= _UNCONFIRMED_MISS_SHARE):
+            out.append(_from_kb(
+                "dx-static-unconfirmed-miss", "diagnosis", "attention",
+                "Static clicks are being fired before the needed correction",
+                f"{unconfirmed} of {misses} matched misses ({miss_share:.0%}) had "
+                "no detectable corrective submovement before the shot, across "
+                f"{labeled} outcome-linked clicks (cutoffs "
+                f"{_STATIC_PHASE_MIN_CLICKS} clicks / "
+                f"{_STATIC_PHASE_MIN_MISSES} misses / "
+                f"{_UNCONFIRMED_MISS_SHARE:.0%} are editorial calibration)."))
         if rep.overshoot_rate > _OVERSHOOT_HIGH and rep.mean_corrections >= _CORRECTIONS_CHAIN:
             out.append(_from_kb(
                 "dx-overshoot-control", "diagnosis", "attention",

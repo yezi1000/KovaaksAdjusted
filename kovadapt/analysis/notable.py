@@ -13,7 +13,7 @@ from .movement import Flick
 class NotableMoment:
     t_start: float          # epoch seconds (pad applied for clip extraction)
     t_end: float
-    kind: str               # overshoot | hesitation | slow_flick | clean_flick
+    kind: str               # overshoot | hesitation | unconfirmed_miss | slow_flick | clean_flick
     severity: float         # 0..1 within this run
     text: str               # plain-language description for the UI
 
@@ -58,6 +58,19 @@ def find_notable_moments(
             f"Hesitated on a {_fmt_dir(f)} target: {f.corrections} micro-corrections "
             f"over {f.duration * 1000:.0f}ms before committing.")
 
+    # Misses fired straight off the primary movement. These were previously
+    # indistinguishable from a clean direct hit and could even be selected as
+    # the positive benchmark below. Per-shot labels come only from one-hit
+    # KovaaK's acquisitions; unknown outcomes are intentionally ignored.
+    raw_misses = [f for f in flicks if f.hit is False and f.corrections == 0]
+    by_unconfirmed = sorted(
+        raw_misses, key=lambda f: (f.overshoot, f.duration), reverse=True)
+    denom = max(len(raw_misses), 1)
+    for rank, f in enumerate(by_unconfirmed[:top_k]):
+        add(f, "unconfirmed_miss", 1.0 - rank / (denom + 1),
+            f"Missed a {_fmt_dir(f)} flick without a corrective submovement "
+            "before firing.")
+
     # Slowest flicks for their size (duration normalized by sqrt amplitude ~ Fitts)
     if len(flicks) >= 5:
         norm = np.array([f.duration / np.sqrt(max(f.amplitude, 1.0)) for f in flicks])
@@ -72,7 +85,8 @@ def find_notable_moments(
                 f"{f.amplitude:.0f}-count flick (bottom 10% of this run's pace).")
 
     # One clean reference flick
-    clean = [f for f in flicks if f.overshoot < 0.05 and f.corrections <= 1]
+    clean = [f for f in flicks
+             if f.hit is not False and f.overshoot < 0.05 and f.corrections <= 1]
     if clean:
         f = max(clean, key=lambda f: f.amplitude)
         add(f, "clean_flick", 1.0,
