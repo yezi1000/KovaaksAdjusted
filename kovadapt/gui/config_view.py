@@ -208,9 +208,10 @@ class ConfigView(QWidget):
             tr("Capture video clips of notable moments (needs kovadapt[clips])"))
         self.clips.setChecked(s.clips_enabled)
         self.clip_fps = _ispin(
-            s.clip_fps, 10, 120,
-            "关键片段录像的目标采样率。60 FPS 占用较低；120 FPS 更容易看清快速甩枪与微调，"
-            "但循环缓冲的内存和编码负载大约翻倍。")
+            s.clip_fps, 10, 1000,
+            "关键片段录像的目标采样率，可设置为 10–1000 FPS。实际录制帧率取决于"
+            "显示器刷新率、桌面复制速度与编码速度。")
+        self.clip_fps.setSuffix(" FPS")
         self.clip_fps.setSingleStep(10)
         self.clip_buf = _dspin(s.clip_buffer_seconds, 30.0, 300.0, 10.0, 0)
         tel = QGroupBox(tr("Telemetry & clips"))
@@ -219,7 +220,7 @@ class ConfigView(QWidget):
         f.addRow("界面动效", self.motion)
         f.addRow(self.telemetry)
         f.addRow(self.clips)
-        f.addRow("录像帧率", self.clip_fps)
+        f.addRow("录像采样率", self.clip_fps)
         f.addRow("录像循环缓冲（秒）", self.clip_buf)
 
         # advanced engine internals
