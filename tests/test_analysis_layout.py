@@ -1019,6 +1019,41 @@ def test_replay_hot_path_moves_cached_head_without_reuploading_data(
     view.deleteLater()
 
 
+def test_speed_band_path_is_vectorized_and_only_separates_disconnected_runs():
+    from kovadapt.gui.replay import _band_path
+
+    x = np.arange(7, dtype=np.float64)
+    y = x * -2.0
+    xs, ys = _band_path(x, y, np.array([0, 1, 4]))
+    np.testing.assert_equal(xs[:4], [0.0, 1.0, 1.0, 2.0])
+    assert np.isnan(xs[4]) and np.isnan(ys[4])
+    np.testing.assert_equal(xs[5:], [4.0, 5.0])
+    np.testing.assert_equal(ys[5:], [-8.0, -10.0])
+
+
+def test_long_replay_drawing_is_capped_exactly_and_keeps_both_ends(
+        qapp, settings):
+    from kovadapt.gui.replay import _MAX_POINTS, TrajectoryReplay
+    from kovadapt.telemetry.trace import MouseTrace
+
+    # 120 seconds at the replay's 500 Hz grid = 60k points. The old integer
+    # stride formula left anything below 100k untouched despite the 50k cap.
+    trace = MouseTrace(
+        t=np.array([1000.0, 1120.0]),
+        dx=np.array([1, 1], dtype=np.int32),
+        dy=np.array([0, 0], dtype=np.int32),
+    )
+    replay = TrajectoryReplay()
+    replay.load(trace)
+    assert replay._t.size == _MAX_POINTS
+    assert replay._t[0] == 0.0
+    assert replay._t[-1] == pytest.approx(119.998)
+    # The grey duplicate was removed; the coloured bands own the full path.
+    full_x, _ = replay._full.getData()
+    assert full_x is None or len(full_x) == 0
+    replay.deleteLater()
+
+
 def test_no_view_widens_a_splitter_handle_past_what_the_theme_asked_for(qapp, settings):
     """`setHandleWidth(14)` for "room to breathe" did not add space — the theme
     FILLS a splitter handle with `pal.border`, so widening it produced a 14px

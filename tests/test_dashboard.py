@@ -350,6 +350,28 @@ def test_play_lockup_and_overlay_row_survive(qapp, settings):
     dash.deleteLater()
 
 
+def test_analysis_can_start_without_a_preselected_scenario(
+        qapp, settings, monkeypatch):
+    from kovadapt.gui.dashboard import Dashboard
+    from kovadapt.gui.workers import WatcherWorker
+
+    # Keep the assertion synchronous: the worker's construction is the
+    # contract under test, not QThread scheduling.
+    monkeypatch.setattr(WatcherWorker, "start", lambda self: None)
+    dash = Dashboard(settings)
+    assert dash.scenario.currentText() == ""
+    dash.toggle()
+    worker = dash.worker
+    assert worker is not None
+    assert worker.watcher.auto_detect
+    assert worker.watcher.base == ""
+    assert dash.scenario.isEnabled(), "monitoring still locked the task picker"
+    dash.worker = None
+    worker.deleteLater()
+    dash.shutdown()
+    dash.deleteLater()
+
+
 def test_picker_supports_workshop_and_local_playlist_sources(qapp, settings):
     (settings.scenarios_dir / "Local Task.sce").write_text("[Scenario]\n")
     steamapps = next(p for p in settings.root.parents if p.name == "steamapps")

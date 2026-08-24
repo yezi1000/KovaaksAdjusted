@@ -13,11 +13,12 @@ The path/flicks/shots checkboxes in the control bar hide layers without
 touching the item architecture — they only flip setVisible on the items.
 
 Lightweight by construction: the overlays are exactly two PlotCurveItems
-regardless of flick count (NaN-separated segments), the path is decimated
-above ~50k points, and the QTimer only runs during playback.  The 120 Hz
-playhead moves one cached graphics item; the more expensive trail and slider
-refresh at 30 Hz. Playback time comes from QElapsedTimer, so speed is
-wall-clock accurate under load.
+regardless of flick count (NaN-separated segments), the path is uniformly
+reduced to at most 50k points, and its colour bands are assembled with NumPy
+rather than a Python loop per segment. The QTimer only runs during playback.
+The 125 Hz playhead moves one cached graphics item; the more expensive trail
+and slider refresh at 30 Hz. Playback time comes from QElapsedTimer, so speed
+is wall-clock accurate under load.
 """
 
 from __future__ import annotations
@@ -56,6 +57,30 @@ _SPEED_COLORS_DARK = (
     "#6272FF", "#3B9EFF", "#25C4C8", "#55D68B", "#D4D64B", "#FFB347")
 _SPEED_COLORS_LIGHT = (
     "#3546B0", "#1769AA", "#007C83", "#2D8245", "#827D00", "#B65B00")
+
+
+def _band_path(x: np.ndarray, y: np.ndarray,
+               segment_indices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Vectorized PlotCurve data for selected line segments.
+
+    Consecutive segments share their endpoint; disconnected runs receive one
+    NaN separator. This avoids the old Python ``extend`` loop for every one of
+    up to 50k segments and usually uploads substantially fewer coordinates.
+    """
+    idx = np.asarray(segment_indices, dtype=np.intp)
+    if not idx.size:
+        return np.empty(0, dtype=np.float64), np.empty(0, dtype=np.float64)
+    points = np.empty(idx.size * 2, dtype=np.intp)
+    points[0::2] = idx
+    points[1::2] = idx + 1
+    xs = np.asarray(x[points], dtype=np.float64)
+    ys = np.asarray(y[points], dtype=np.float64)
+    breaks = np.flatnonzero(np.diff(idx) > 1)
+    if breaks.size:
+        positions = 2 * (breaks + 1)
+        xs = np.insert(xs, positions, np.nan)
+        ys = np.insert(ys, positions, np.nan)
+    return xs, ys
 
 
 class TrajectoryReplay(QWidget):
@@ -287,16 +312,22 @@ class TrajectoryReplay(QWidget):
             self._update_legend()
             self._sync_transport()
             return
-        # decimate for drawing: replay is an indicator, not a data export
-        stride = max(1, t.size // _MAX_POINTS)
-        t, x, y = t[::stride], x[::stride], y[::stride]
-        point_speed = point_speed[::stride]
+        # Uniformly reduce only the DRAWING representation. linspace keeps
+        # both endpoints and enforces the cap exactly; integer division used
+        # to leave 50,001..99,999 samples completely undecimated.
+        if t.size > _MAX_POINTS:
+            keep = np.linspace(0, t.size - 1, _MAX_POINTS, dtype=np.intp)
+            t, x, y = t[keep], x[keep], y[keep]
+            point_speed = point_speed[keep]
         base = t[0]
         self._t = t - base
         self._x, self._y = x, y
         self._point_speed = point_speed
         self._deg_per_count = max(float(deg_per_count or 0.0), 0.0)
-        self._full.setData(x, y)
+        # The six coloured curves cover every segment, so uploading the same
+        # 50k-point geometry once more as a grey underlay only consumes scene
+        # graph/GPU work without adding information.
+        self._full.setData([], [])
         self._draw_speed_path()
         self._live.setData([], [])
         self._head.setData(np.array([0.0]), np.array([0.0]))
@@ -377,11 +408,8 @@ class TrajectoryReplay(QWidget):
         norm = np.clip((segment_speed - lo) / (hi - lo), 0.0, 1.0)
         bands = np.minimum((norm * _SPEED_BANDS).astype(int), _SPEED_BANDS - 1)
         for band, curve in enumerate(self._speed_curves):
-            xs: list[float] = []
-            ys: list[float] = []
-            for i in np.flatnonzero(bands == band):
-                xs.extend((float(self._x[i]), float(self._x[i + 1]), np.nan))
-                ys.extend((float(self._y[i]), float(self._y[i + 1]), np.nan))
+            xs, ys = _band_path(self._x, self._y,
+                                np.flatnonzero(bands == band))
             curve.setData(xs, ys)
         self._update_legend()
 

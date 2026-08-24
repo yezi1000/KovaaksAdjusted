@@ -1,10 +1,10 @@
 """Session watcher: the closed adaptation loop.
 
-Polls the stats folder; when a new run of the tracked adaptive scenario (or
-its base) lands, it: parses -> analyzes telemetry -> updates profile -> plans
--> regenerates the adaptive .sce. Next time the scenario is loaded in
-KovaaK's, the new variant is live. Polling (1s) is plenty — runs end at human
-timescales.
+Polls the stats folder; when a new run lands, it can either follow one
+explicit scenario (CLI compatibility) or infer the actual scenario from each
+stats filename/CSV (GUI default). It then parses -> analyzes telemetry ->
+updates that scenario's profile -> plans -> regenerates its adaptive .sce.
+Polling (1s) is plenty — runs end at human timescales.
 """
 
 from __future__ import annotations
@@ -37,8 +37,10 @@ class SessionWatcher:
         on_report: Callable[[RunReport], None] | None = None,
     ) -> None:
         self.s = settings
+        self.auto_detect = not bool(base_scenario.strip())
         self.base = base_scenario
-        self.adaptive_name = base_scenario + ADAPTIVE_SUFFIX
+        self.adaptive_name = (base_scenario + ADAPTIVE_SUFFIX
+                              if base_scenario else "")
         self.engine = AdaptationEngine(settings)
         self.log = on_update
         self.on_report = on_report
@@ -264,7 +266,21 @@ class SessionWatcher:
 
     def _relevant(self, name: str) -> bool:
         meta = parse_stats_filename(name)
-        return meta is not None and meta[0] in (self.base, self.adaptive_name)
+        if meta is None:
+            return False
+        return self.auto_detect or meta[0] in (self.base, self.adaptive_name)
+
+    def _select_run_scenario(self, scenario: str) -> None:
+        """Route an automatically detected run to its own model and variant.
+
+        Adaptive runs feed the same base profile rather than producing names
+        such as ``Task [Adaptive] [Adaptive]``. Capture and fatigue remain
+        session-scoped; only the scenario-specific destinations change.
+        """
+        if not self.auto_detect:
+            return
+        self.base = scenario.removesuffix(ADAPTIVE_SUFFIX)
+        self.adaptive_name = self.base + ADAPTIVE_SUFFIX
 
     def _pending_files(self) -> list[Path]:
         def mtime(p: Path) -> float:
@@ -283,6 +299,7 @@ class SessionWatcher:
     def process_run(self, csv_path: Path) -> Path:
         """Fold one run into the model and regenerate the adaptive .sce."""
         run = parse_stats_csv(csv_path)
+        self._select_run_scenario(run.scenario)
         rep = self._analyze(run)
         profile = PlayerProfile.load(self.adaptive_name, self.s.profile_path)
         profile.scenario = self.adaptive_name
@@ -341,17 +358,31 @@ class SessionWatcher:
             profile, run, fatigue=fatigue, capability=cap,
             click_phases=rep.click_phases,
         )
-        out = generate_adaptive_variant(
-            self.base_sce_path(), plan, self.s, self.adaptive_sce_path()
-        )
-        if settle_focus(profile, plan):
+        base_path = self.base_sce_path()
+        # Auto monitoring must still retain analysis for an online task whose
+        # source .sce is not cached where kovadapt can read it. There is no
+        # safe file to adapt, but the CSV, mouse trace, report and per-scenario
+        # learning are all valid. Explicit single-scenario mode keeps its old
+        # fail-fast contract so CLI mistakes remain visible.
+        analysis_only = self.auto_detect and not base_path.is_file()
+        if analysis_only:
+            out = self.adaptive_sce_path()
+            plan.focus_applied = False
+        else:
+            out = generate_adaptive_variant(
+                base_path, plan, self.s, self.adaptive_sce_path()
+            )
+        if settle_focus(profile, plan) and not analysis_only:
             self.log(f"  note: region {plan.focus_region} has no spawns here — "
                      "focus not applied, arm not credited")
         profile.save(self.s.profile_path)
-        self._log_shadow(shadow_state, plan, run)
+        if not analysis_only:
+            self._log_shadow(shadow_state, plan, run)
+        action = ("analysis saved; source .sce unavailable, variant skipped"
+                  if analysis_only else plan.describe())
         self.log(
-            f"[{datetime.now():%H:%M:%S}] run #{profile.run_count} "
-            f"acc={run.accuracy:.1%} score={run.score:.0f} -> {plan.describe()}"
+            f"[{datetime.now():%H:%M:%S}] {self.base} run #{profile.run_count} "
+            f"acc={run.accuracy:.1%} score={run.score:.0f} -> {action}"
         )
         if rep.summary_text:
             self.log(f"  analysis: {rep.summary_text}")
@@ -393,11 +424,13 @@ class SessionWatcher:
         self._fatigue_level_logged = "fresh"
         # Ignore history that predates the watcher.
         self._seen = {p.name for p in self.s.stats_dir.glob("*.csv")}
-        if not self.adaptive_sce_path().is_file():
+        if not self.auto_detect and not self.adaptive_sce_path().is_file():
             self.bootstrap()
         # Never reset stop_requested here: a request_stop() that lands while
         # watch() is still starting up (GUI Stop right after Start) must win.
-        self.log(f"watching {self.s.stats_dir} for '{self.base}' runs (ctrl-c to stop)")
+        target = ("all new runs (scenario detected from each stats CSV)"
+                  if self.auto_detect else f"'{self.base}' runs")
+        self.log(f"watching {self.s.stats_dir} for {target} (ctrl-c to stop)")
         try:
             # INSIDE the try: capture start is what most often fails (dxcam
             # raises on unsupported hardware), and if the mouse recorder is

@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 from .. import launcher
 from ..config import ADAPTIVE_SUFFIX, Settings
 from ..profile.player import PlayerProfile
+from ..watcher import SessionWatcher
 from . import theme, viz
 from .ascii_art import CatSlider
 from .i18n import tr
@@ -348,6 +349,9 @@ def dashboard_message_zh(message: str) -> str:
         name = msg.split(" —", 1)[0].removeprefix("created ")
         return f"已创建 {name}；在 KovaaK's 中开始训练后，每局结束都会继续适配"
     if msg.startswith("watching "):
+        if "all new runs (scenario detected from each stats CSV)" in msg:
+            path = msg.removeprefix("watching ").split(" for all new runs", 1)[0]
+            return f"正在监测 {path}；每局将根据统计 CSV 自动识别实际场景"
         match = re.match(r"watching (.+) for (.+) runs", msg)
         return (f"正在监测 {match.group(1)} 中的 {match.group(2)} 训练记录"
                 if match else "正在监测新的训练记录")
@@ -379,11 +383,16 @@ def dashboard_message_zh(message: str) -> str:
     if msg.lstrip().startswith("note: region "):
         region = _first_group(r"region (r\d+c\d+)", msg, "所选区域")
         return f"提示：{region} 没有目标生成点，未应用重点权重，也不会给该区域记入训练收益"
-    if re.match(r"\[\d\d:\d\d:\d\d\] run #", msg):
-        match = re.match(r"(\[[^]]+\]) run #(\d+) acc=([\d.]+%) score=([\d.]+) -> (.+)", msg)
+    if re.match(r"\[\d\d:\d\d:\d\d\] .+ run #", msg):
+        match = re.match(
+            r"(\[[^]]+\]) (.+) run #(\d+) acc=([\d.]+%) score=([\d.]+) -> (.+)",
+            msg)
         if match:
-            return (f"{match.group(1)} 第 {match.group(2)} 局：准确率 {match.group(3)}，"
-                    f"分数 {match.group(4)} → {match.group(5)}")
+            action = match.group(6).replace(
+                "analysis saved; source .sce unavailable, variant skipped",
+                "复盘与历史已保存；缺少源 .sce，已跳过自适应版本生成")
+            return (f"{match.group(1)} {match.group(2)} 第 {match.group(3)} 局："
+                    f"准确率 {match.group(4)}，分数 {match.group(5)} → {action}")
     if msg.lstrip().startswith("analysis:"):
         return "复盘报告已生成；详细结果请查看“复盘分析”页面"
     return msg
@@ -507,7 +516,7 @@ class Dashboard(QWidget):
         self.worker: WatcherWorker | None = None
         self._watching: str = ""
         self._stopping = False
-        self._pending: tuple[str, str] | None = None   # (scenario, "play"|"watch")
+        self._pending: tuple[str, str] | None = None   # action after Stop lands
         self._last_log = ""
         self._last_profile: PlayerProfile | None = None
         self._install: launcher.InstallStatus | None = None
@@ -518,8 +527,9 @@ class Dashboard(QWidget):
         self.overlay = OverlayWindow(settings)
 
         hint = HintBar(settings, (
-            "选择场景后点击<b>开始自适应训练</b>。kovadapt 会监测每一局，"
-            "并在局间重新生成 <b>[Adaptive]</b> 版本。下方三个指标分别表示："
+            "无需预选场景：点击<b>开始分析</b>后，kovadapt 会从每局生成的统计 "
+            "CSV 自动识别你实际游玩的任务，并分别保存报告和模型。场景选择只用于"
+            "启动指定的自适应训练。下方三个指标分别表示："
             "<b>准备度</b>（模型校准程度）、<b>近期状态</b>（相对个人基线的近期"
             "准确率）和<b>训练负荷</b>（本次训练的疲劳程度）。训练开始后会"
             "自动记录鼠标遥测，界面以 <b>REC</b> 圆点提示。"))
@@ -581,7 +591,7 @@ class Dashboard(QWidget):
         row1.setSpacing(10)
         row1.addWidget(QLabel("来源："))
         row1.addWidget(self.scenario_source)
-        row1.addWidget(QLabel(tr("Scenario:")))
+        row1.addWidget(QLabel("启动任务（可选）："))
         row1.addWidget(self.scenario, 1)
         row1.addWidget(self.refresh_btn)
         row1.addWidget(self.start_btn)
@@ -771,20 +781,32 @@ class Dashboard(QWidget):
         self.play()
 
     def watch_scenario(self, name: str) -> None:
-        if self.worker is not None and self._watching != name:
-            self._switch_to(name, "watch")
-            return
         self.scenario.setCurrentText(name)
+        if self._stopping:
+            self._pending = (name, "watch")
+            return
+        # The browser's explicit "Start adapting" still prepares the chosen
+        # task, but the recorder itself is global and follows whatever the
+        # player actually runs afterwards.
+        if not self._ensure_adaptive(name):
+            return
         if self.worker is None:
             self.toggle()
 
-    def _switch_to(self, name: str, kind: str) -> None:
-        """Stop the running session and start `name` once it is down —
-        changing scenarios must never require a manual stop first."""
-        self._pending = (name, kind)
-        self.append_log(f"switching from {self._watching!r} to {name!r}…")
-        if not self._stopping:
-            self.toggle()               # the stop branch
+    def _ensure_adaptive(self, name: str) -> bool:
+        """Prepare one selected task without binding the live watcher to it."""
+        helper = SessionWatcher(self.s, name, on_update=self.append_log)
+        if not helper.base_sce_path().is_file():
+            self.append_log(f"scenario file not found: {helper.base_sce_path()}")
+            return False
+        if helper.adaptive_sce_path().is_file():
+            return True
+        try:
+            helper.bootstrap()
+        except Exception as exc:
+            self.append_log(f"could not create adaptive variant: {exc}")
+            return False
+        return True
 
     def play(self) -> None:
         """Watch + queue playlist + deep-link into the adaptive scenario."""
@@ -795,10 +817,9 @@ class Dashboard(QWidget):
         if self._stopping:
             self._pending = (name, "play")   # start this once the stop lands
             return
-        if self.worker is not None and self._watching != name:
-            self._switch_to(name, "play")
+        if not self._ensure_adaptive(name):
             return
-        if self.worker is None and not self._start_watch(name):
+        if self.worker is None and not self._start_watch():
             return
         self._refresh_install()
         msg, _ok = launcher.play_adaptive(self.s, name)
@@ -813,43 +834,24 @@ class Dashboard(QWidget):
             self.start_btn.setText(tr("Stopping…"))
             self.play_btn.setEnabled(False)
             return
-        name = self._picked_scenario()
-        if not name:
-            self.append_log("pick a scenario first")
-            return
-        self._start_watch(name)
+        self._start_watch()
 
-    def _start_watch(self, name: str) -> bool:
-        """Create the worker, bootstrap the adaptive .sce synchronously (so
-        Play can deep-link immediately), and start watching."""
-        w = WatcherWorker(self.s, name, parent=self)
-        if not w.watcher.base_sce_path().is_file():
-            self.append_log(f"scenario file not found: {w.watcher.base_sce_path()}")
-            w.deleteLater()
-            return False
-        # Connect before bootstrap so its log lines actually land in the log.
+    def _start_watch(self) -> bool:
+        """Start one global watcher; each new CSV chooses its own scenario."""
+        w = WatcherWorker(self.s, "", parent=self)
         w.message.connect(self.append_log)
         w.report_ready.connect(self._on_report)
         w.stopped.connect(self._on_stopped)
         w.finished.connect(w.deleteLater)   # don't retain dead QThreads
-        if not w.watcher.adaptive_sce_path().is_file():
-            try:
-                w.watcher.bootstrap()
-            except Exception as exc:
-                self.append_log(f"could not create adaptive variant: {exc}")
-                w.deleteLater()
-                return False
         self.worker = w
-        self._watching = name
+        self._watching = ""
         w.start()
         self.start_btn.setText(tr("Stop"))
-        self.scenario.setEnabled(False)
         self._render_rec(True)
         # The watcher's fatigue tracker is session-scoped and restarts here;
         # LOAD must not keep citing the previous session's trend.
         self._fatigue = {}
-        self.refresh_profile(name)
-        self.overlay.start_session(name + ADAPTIVE_SUFFIX)
+        self.overlay.start_session("自动识别实际场景")
         if self.s.overlay_autoshow and not self.ov_toggle.isChecked():
             self.ov_toggle.setChecked(True)
         return True
@@ -860,7 +862,6 @@ class Dashboard(QWidget):
         self._stopping = False
         self.start_btn.setEnabled(True)
         self.start_btn.setText(tr("Start adapting"))
-        self.scenario.setEnabled(True)
         self._render_install()          # re-enable Play per install status
         self._render_rec(False)
         self.overlay.stop_session()
@@ -872,13 +873,26 @@ class Dashboard(QWidget):
             if kind == "play":
                 self.play()
             else:
-                self.toggle()
+                self.watch_scenario(name)
 
     def _on_report(self, rep) -> None:
-        # Stash the fatigue reading BEFORE the reload: LOAD reads it, and
-        # refresh_profile is what repaints the heroes.
+        actual = str(getattr(rep, "scenario", "")).removesuffix(ADAPTIVE_SUFFIX)
+        if not actual:
+            return
+        # Follow the evidence rather than the pre-run picker. Blocking the
+        # signal avoids an intermediate reload that would clear this report's
+        # fatigue state before the cards paint.
+        blocked = self.scenario.blockSignals(True)
+        try:
+            self.scenario.setCurrentText(actual)
+        finally:
+            self.scenario.blockSignals(blocked)
+        if self._watching != actual:
+            self._watching = actual
+            self.overlay.start_session(actual + ADAPTIVE_SUFFIX)
+        self._shown = actual
         self._fatigue = dict(getattr(rep, "fatigue", None) or {})
-        self.refresh_profile(self._watching or self._picked_scenario())
+        self.refresh_profile(actual)
         self.overlay.on_report(rep, self._last_profile)
         self.report_ready.emit(rep)
 

@@ -218,6 +218,51 @@ def test_relevant_filenames(env: Settings):
     assert not w._relevant("not a stats file.csv")
 
 
+def test_auto_watcher_accepts_every_valid_stats_filename(env: Settings):
+    w = SessionWatcher(env, "", on_update=lambda m: None)
+    assert w.auto_detect
+    assert w._relevant(f"{BASE} - Challenge - {TS} Stats.csv")
+    assert w._relevant(f"other scenario - Challenge - {TS} Stats.csv")
+    assert not w._relevant("notes.csv")
+
+
+def test_auto_watcher_routes_runs_to_separate_profiles_and_variants(env: Settings):
+    other = "another click task"
+    (env.scenarios_dir / f"{other}.sce").write_text(
+        mini_sce_text(other), encoding="utf-8")
+    w = SessionWatcher(env, "", on_update=lambda m: None)
+
+    first = w.process_run(write_stats_csv(
+        env.stats_dir, BASE, ts="2026.05.27-20.25.38"))
+    second = w.process_run(write_stats_csv(
+        env.stats_dir, other, ts="2026.05.27-20.30.00"))
+
+    assert first == env.scenarios_dir / f"{BASE}{ADAPTIVE_SUFFIX}.sce"
+    assert second == env.scenarios_dir / f"{other}{ADAPTIVE_SUFFIX}.sce"
+    assert first.is_file() and second.is_file()
+    assert PlayerProfile.load(
+        BASE + ADAPTIVE_SUFFIX, env.profile_path).run_count == 1
+    assert PlayerProfile.load(
+        other + ADAPTIVE_SUFFIX, env.profile_path).run_count == 1
+    assert w.base == other and w.adaptive_name == other + ADAPTIVE_SUFFIX
+
+
+def test_auto_watcher_keeps_analysis_when_source_scenario_is_unavailable(
+        env: Settings):
+    online = "uncached online task"
+    logs: list[str] = []
+    reports: list[RunReport] = []
+    w = SessionWatcher(env, "", on_update=logs.append,
+                       on_report=reports.append)
+    out = w.process_run(write_stats_csv(env.stats_dir, online))
+
+    assert not out.exists()                 # no source .sce means no variant
+    prof = PlayerProfile.load(online + ADAPTIVE_SUFFIX, env.profile_path)
+    assert prof.run_count == 1              # but the run was not discarded
+    assert reports and reports[0].scenario == online
+    assert any("variant skipped" in line for line in logs)
+
+
 def test_relevant_with_dash_in_scenario_name(env: Settings):
     # the stats filename grammar's scenario group is greedy — " - " in names works
     w = SessionWatcher(env, DASHED, on_update=lambda m: None)
