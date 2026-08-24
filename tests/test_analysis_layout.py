@@ -1093,6 +1093,15 @@ def test_visible_replay_flattens_static_vectors_but_keeps_shots_interactive(
     replay.deleteLater()
 
 
+def test_shot_hover_tip_accepts_pyqtgraph_keyword_arguments(qapp, settings):
+    from kovadapt.gui.replay import TrajectoryReplay
+
+    replay = TrajectoryReplay()
+    tip = replay._shots.opts["tip"]
+    assert tip(x=12.0, y=-4.0, data=7) == "第 7 次点击"
+    replay.deleteLater()
+
+
 def test_no_view_widens_a_splitter_handle_past_what_the_theme_asked_for(qapp, settings):
     """`setHandleWidth(14)` for "room to breathe" did not add space — the theme
     FILLS a splitter handle with `pal.border`, so widening it produced a 14px

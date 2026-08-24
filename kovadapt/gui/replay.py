@@ -144,7 +144,10 @@ class TrajectoryReplay(QWidget):
         self._head = pg.ScatterPlotItem(size=10, pen=None)
         self._shots = pg.ScatterPlotItem(
             size=14, brush=None, symbol="x", hoverable=True,
-            tip=lambda _x, _y, data: f"第 {int(data)} 次点击")
+            # pyqtgraph 0.14 calls tips with x=, y= and data= keywords.
+            # Parameter names are therefore API, even though only the click
+            # number is displayed.
+            tip=lambda x, y, data: f"第 {int(data)} 次点击")
         self._shot_label = pg.TextItem(anchor=(0.5, 1.35))
         self.plot.addItem(self._head)
         self.plot.addItem(self._shots)
