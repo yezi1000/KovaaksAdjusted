@@ -23,6 +23,7 @@ import numpy as np
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QFrame,
     QGroupBox,
@@ -827,6 +828,17 @@ class AnalysisView(QWidget):
         self.charts.setMinimumHeight(300)
 
         # ---- notable moments + replay, also side by side
+        self.moment_filter = QComboBox()
+        for label, kind in (("全部类型", "all"),
+                            ("过冲", "overshoot"),
+                            ("犹豫与连续修正", "hesitation"),
+                            ("未检测到末端控制的空枪", "unconfirmed_miss"),
+                            ("较慢定位", "slow_flick"),
+                            ("干净参考", "clean_flick")):
+            self.moment_filter.addItem(label, kind)
+        self.moment_filter.setToolTip(
+            "按分析规则分别查看关键片段；每种规则最多保留 10 条")
+        self.moment_filter.currentIndexChanged.connect(self._refilter_moments)
         self.moments = QListWidget()
         # Moment text is a full sentence, and the panel is ~330px wide: elided
         # to one line it read "Overshot a right flick by 36% of its distance,
@@ -863,6 +875,7 @@ class AnalysisView(QWidget):
 
         mo_box = QGroupBox(tr("Notable moments"))
         mo_lay = QVBoxLayout(mo_box)
+        mo_lay.addWidget(self.moment_filter)
         mo_lay.addWidget(self.moments, 1)
         btn_row = QHBoxLayout()
         btn_row.addWidget(self.full_btn)
@@ -1476,6 +1489,11 @@ class AnalysisView(QWidget):
         item.setFlags(Qt.NoItemFlags)
         self.moments.addItem(item)
 
+    def _refilter_moments(self, _index: int = -1) -> None:
+        """Rebuild only the moment list for the selected rule."""
+        if self.report is not None:
+            self._fill_moments(self.report)
+
     def _fill_moments(self, rep: RunReport) -> None:
         self.moments.blockSignals(True)
         self.moments.clear()
@@ -1489,7 +1507,10 @@ class AnalysisView(QWidget):
             note.setForeground(QColor(theme.current().fg_dim))
             note.setFlags(Qt.NoItemFlags)          # a caption, not a choice
             self.moments.addItem(note)
+        selected_kind = self.moment_filter.currentData() or "all"
         for i, m in enumerate(rep.notable):
+            if selected_kind != "all" and m.get("kind") != selected_kind:
+                continue
             it = QListWidgetItem(moment_text_zh(m))
             it.setForeground(QColor(_kind_color(m["kind"])))
             it.setData(Qt.UserRole, i)

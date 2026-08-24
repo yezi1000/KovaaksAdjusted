@@ -338,13 +338,46 @@ def test_play_lockup_and_overlay_row_survive(qapp, settings):
     from kovadapt.gui.i18n import tr
 
     dash = _dashboard(settings, "Pi")
-    for w in (dash.scenario, dash.refresh_btn, dash.start_btn, dash.play_btn,
+    for w in (dash.scenario_source, dash.scenario, dash.refresh_btn,
+              dash.start_btn, dash.play_btn,
               dash.launch_btn, dash.install_lbl, dash.rec_lbl,
               dash.ov_toggle, dash.ov_unlock, dash.ov_opacity, dash.ov_auto):
         assert w is not None
     assert dash.scenario.currentText() == "Pi"
     assert dash.start_btn.text() == tr("Start adapting")
     assert dash.worker is None                    # nothing launched by building
+    dash.shutdown()
+    dash.deleteLater()
+
+
+def test_picker_supports_workshop_and_local_playlist_sources(qapp, settings):
+    (settings.scenarios_dir / "Local Task.sce").write_text("[Scenario]\n")
+    steamapps = next(p for p in settings.root.parents if p.name == "steamapps")
+    workshop = steamapps / "workshop" / "content" / settings.WORKSHOP_APPID / "42"
+    workshop.mkdir(parents=True)
+    (workshop / "Online Task.sce").write_text("[Scenario]\n")
+    settings.playlists_dir.mkdir(parents=True)
+    (settings.playlists_dir / "routine.json").write_text(json.dumps({
+        "playlistName": "Routine",
+        "authorName": "player",
+        "scenarioList": [
+            {"scenario_name": "Online Task", "play_Count": 1},
+            {"scenario_name": "Missing Task", "play_Count": 1},
+            {"scenario_name": "Local Task", "play_Count": 2},
+        ],
+    }), encoding="utf-8")
+
+    dash = _dashboard(settings)
+    dash.scenario_source.setCurrentIndex(dash.scenario_source.findData("workshop"))
+    assert [dash.scenario.itemText(i) for i in range(dash.scenario.count())] == [
+        "Online Task"]
+    playlist_i = next(i for i in range(dash.scenario_source.count())
+                      if str(dash.scenario_source.itemData(i)).startswith("playlist:"))
+    dash.scenario_source.setCurrentIndex(playlist_i)
+    assert [dash.scenario.itemText(i) for i in range(dash.scenario.count())] == [
+        "Online Task", "Local Task"]
+    assert "2 个已缓存" in dash.source_info.text()
+    assert "1 个尚未安装" in dash.source_info.text()
     dash.shutdown()
     dash.deleteLater()
 

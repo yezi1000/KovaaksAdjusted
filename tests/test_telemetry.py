@@ -212,6 +212,17 @@ def test_notable_moments_kinds_and_bounds():
         assert m.click_index > 0
 
 
+def test_notable_moments_keep_up_to_ten_per_kind():
+    b = TraceBuilder()
+    for _ in range(12):
+        b.flick(220, 0, overshoot=0.30)
+    for _ in range(12):
+        b.flick(-220, 0)
+    moments = find_notable_moments(segment_flicks(b.build()))
+    assert sum(m.kind == "overshoot" for m in moments) == 10
+    assert sum(m.kind == "clean_flick" for m in moments) == 10
+
+
 def test_one_shot_stats_label_misses_and_prevent_a_false_clean_reference():
     """The per-target row says the second target took two shots. The Raw
     Input click nearest its kill timestamp is the hit; the prior click is the

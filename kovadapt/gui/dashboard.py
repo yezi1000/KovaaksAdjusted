@@ -513,6 +513,8 @@ class Dashboard(QWidget):
         self._install: launcher.InstallStatus | None = None
         self._fatigue: dict = {}          # newest report's FatigueState, if any
         self._shown: str | None = None    # scenario the heroes currently read
+        self._source_scenarios: dict[str, list[str]] = {}
+        self._source_counts: dict[str, tuple[int, int]] = {}
         self.overlay = OverlayWindow(settings)
 
         hint = HintBar(settings, (
@@ -562,6 +564,11 @@ class Dashboard(QWidget):
             "Playlists → kovadapt adaptive 开始训练")
         self.play_btn.clicked.connect(self.play)
 
+        self.scenario_source = QComboBox()
+        self.scenario_source.setMinimumWidth(230)
+        self.scenario_source.setToolTip(
+            "选择全部、本地、Steam 创意工坊缓存，或某个本地游玩清单")
+        self.scenario_source.currentIndexChanged.connect(self._source_changed)
         self.scenario = QComboBox()
         self.scenario.setEditable(True)
         self.refresh_btn = QPushButton(tr("Refresh"))
@@ -572,12 +579,17 @@ class Dashboard(QWidget):
         # full-width Play panel: the column's lead panel, generous rows
         row1 = QHBoxLayout()
         row1.setSpacing(10)
+        row1.addWidget(QLabel("来源："))
+        row1.addWidget(self.scenario_source)
         row1.addWidget(QLabel(tr("Scenario:")))
         row1.addWidget(self.scenario, 1)
         row1.addWidget(self.refresh_btn)
         row1.addWidget(self.start_btn)
         self.rec_lbl = QLabel("")
         self.rec_lbl.setTextFormat(Qt.RichText)
+        self.source_info = QLabel("")
+        self.source_info.setProperty("dim", True)
+        self.source_info.setWordWrap(True)
         row2 = QHBoxLayout()
         row2.setSpacing(10)
         row2.addWidget(self.install_lbl, 1)
@@ -589,6 +601,7 @@ class Dashboard(QWidget):
         pv.setContentsMargins(14, 12, 14, 14)
         pv.setSpacing(12)
         pv.addLayout(row1)
+        pv.addWidget(self.source_info)
         pv.addLayout(row2)
 
         # -------------------------------------------------- overlay controls
@@ -900,28 +913,99 @@ class Dashboard(QWidget):
     # ------------------------------------------------------------------
     def refresh_scenarios(self) -> None:
         cur = self.scenario.currentText()
+        source = self.scenario_source.currentData() or "all"
         # Rebuilding the list is not a user pick. clear() emits
         # currentTextChanged("") and setCurrentText() emits it again, and the
         # picker is wired to refresh_profile — so an unguarded Refresh ran
         # refresh_profile("") mid-session, which sees a changed scenario and
         # discards the session's fatigue reading. Pressing Refresh must not
         # erase LOAD.
-        blocked = self.scenario.blockSignals(True)
+        found = self.s.base_sce_paths()
+        available = {n for n in found if not n.endswith(ADAPTIVE_SUFFIX)}
+        local = {
+            p.stem for p in self.s.scenarios_dir.glob("*.sce")
+            if not p.stem.endswith(ADAPTIVE_SUFFIX)
+        } if self.s.scenarios_dir.is_dir() else set()
+        workshop_dir = self.s.workshop_dir
+        workshop = {
+            p.stem for p in workshop_dir.rglob("*.sce")
+            if not p.stem.endswith(ADAPTIVE_SUFFIX)
+        } if workshop_dir is not None else set()
+
+        self._source_scenarios = {
+            "all": sorted(available, key=str.lower),
+            "local": sorted(local, key=str.lower),
+            "workshop": sorted(workshop, key=str.lower),
+        }
+        self._source_counts = {
+            "all": (len(available), len(available)),
+            "local": (len(local), len(local)),
+            "workshop": (len(workshop), len(workshop)),
+        }
+
+        blocked = self.scenario_source.blockSignals(True)
         try:
-            self.scenario.clear()
-            if self.s.scenarios_dir.is_dir():
-                names = sorted(
-                    p.stem for p in self.s.scenarios_dir.glob("*.sce")
-                    if not p.stem.endswith(ADAPTIVE_SUFFIX)
-                )
-                self.scenario.addItems(names)
-            if cur:
-                self.scenario.setCurrentText(cur)
+            self.scenario_source.clear()
+            self.scenario_source.addItem("全部可用场景", "all")
+            self.scenario_source.addItem("本地场景", "local")
+            self.scenario_source.addItem("在线场景（创意工坊缓存）", "workshop")
+            for playlist in launcher.read_local_playlists(self.s):
+                key = f"playlist:{playlist.path}"
+                ordered: list[str] = []
+                seen: set[str] = set()
+                raw_names = [name.removesuffix(ADAPTIVE_SUFFIX)
+                             for name, _count in playlist.scenarios]
+                for name in raw_names:
+                    if name in available and name not in seen:
+                        seen.add(name)
+                        ordered.append(name)
+                self._source_scenarios[key] = ordered
+                self._source_counts[key] = (len(ordered), len(raw_names))
+                self.scenario_source.addItem(f"游玩清单：{playlist.name}", key)
+            idx = self.scenario_source.findData(source)
+            self.scenario_source.setCurrentIndex(idx if idx >= 0 else 0)
         finally:
-            self.scenario.blockSignals(blocked)
+            self.scenario_source.blockSignals(blocked)
+        self._populate_scenario_picker(cur)
         # Only a genuine change of pick reloads (and legitimately clears it).
         if self._picked_scenario() != self._shown:
             self.refresh_profile(self._picked_scenario())
+
+    def _source_changed(self, _index: int = -1) -> None:
+        self._populate_scenario_picker(self._picked_scenario())
+        if self._picked_scenario() != self._shown:
+            self.refresh_profile(self._picked_scenario())
+
+    def _populate_scenario_picker(self, keep: str = "") -> None:
+        """Fill individual scenarios for the selected source/playlist."""
+        source = self.scenario_source.currentData() or "all"
+        names = self._source_scenarios.get(source, [])
+        blocked = self.scenario.blockSignals(True)
+        try:
+            self.scenario.clear()
+            for name in names:
+                self.scenario.addItem(name, name)
+            normalized = keep.strip().removesuffix(ADAPTIVE_SUFFIX)
+            if normalized in names or (source == "all" and normalized):
+                self.scenario.setCurrentText(normalized)
+        finally:
+            self.scenario.blockSignals(blocked)
+
+        ready, total = self._source_counts.get(source, (len(names), len(names)))
+        if source.startswith("playlist:"):
+            missing = total - ready
+            text = f"该清单有 {total} 个场景，其中 {ready} 个已缓存并可用于自适应"
+            if missing:
+                text += f"；{missing} 个尚未安装或不在创意工坊缓存中"
+        elif source == "workshop":
+            text = f"已找到 {ready} 个 Steam 创意工坊缓存场景；无需复制到本地即可生成自适应版本"
+        elif source == "local":
+            text = f"已找到 {ready} 个本地场景"
+        else:
+            text = (f"共 {ready} 个可用场景：本地 "
+                    f"{len(self._source_scenarios.get('local', []))} 个，创意工坊缓存 "
+                    f"{len(self._source_scenarios.get('workshop', []))} 个")
+        self.source_info.setText(text)
 
     def _toggle_log(self, on: bool) -> None:
         self.log.setVisible(on)

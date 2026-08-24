@@ -100,6 +100,21 @@ def make_settings(root: Path, state: Path) -> Settings:
     )
 
 
+def test_watcher_reads_a_workshop_base_but_writes_variant_locally(tmp_path):
+    root = tmp_path / "lib" / "steamapps" / "common" / "FPSAimTrainer" / "FPSAimTrainer"
+    make_kovaaks_tree(root)
+    online = "Workshop Task"
+    workshop = (tmp_path / "lib" / "steamapps" / "workshop" / "content"
+                / Settings.WORKSHOP_APPID / "42")
+    workshop.mkdir(parents=True)
+    base = workshop / f"{online}.sce"
+    base.write_text(mini_sce_text(online), encoding="utf-8")
+    s = make_settings(root, tmp_path / "state")
+    watcher = SessionWatcher(s, online)
+    assert watcher.base_sce_path() == base
+    assert watcher.adaptive_sce_path().parent == s.scenarios_dir
+
+
 def wait_for(cond, timeout: float = 5.0, step: float = 0.005) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:

@@ -175,6 +175,49 @@ def _playlist_path(settings: Settings, name: str = PLAYLIST_NAME) -> Path:
     return settings.playlists_dir / f"{safe}.json"
 
 
+@dataclass(frozen=True)
+class LocalPlaylist:
+    """A user-visible KovaaK's playlist read from SaveGames/Playlists."""
+
+    name: str
+    path: Path
+    scenarios: tuple[tuple[str, int], ...]
+
+
+def read_local_playlists(
+    settings: Settings, *, include_generated: bool = False
+) -> list[LocalPlaylist]:
+    """Read valid local playlists; one damaged JSON never hides the rest."""
+    if not settings.playlists_dir.is_dir():
+        return []
+    out: list[LocalPlaylist] = []
+    for path in sorted(settings.playlists_dir.glob("*.json"),
+                       key=lambda p: p.name.lower()):
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        if not include_generated and doc.get("authorName") == AUTHOR:
+            continue
+        scenarios: list[tuple[str, int]] = []
+        for item in doc.get("scenarioList", []):
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("scenario_name", "")).strip()
+            if not name:
+                continue
+            try:
+                count = max(int(item.get("play_Count", 1)), 1)
+            except (TypeError, ValueError):
+                count = 1
+            scenarios.append((name, count))
+        name = str(doc.get("playlistName", "")).strip() or path.stem
+        out.append(LocalPlaylist(name, path, tuple(scenarios)))
+    return out
+
+
 def write_playlist(
     settings: Settings,
     scenarios: list[tuple[str, int]],

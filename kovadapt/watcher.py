@@ -254,7 +254,10 @@ class SessionWatcher:
 
     # ------------------------------------------------------------------
     def base_sce_path(self) -> Path:
-        return self.s.scenarios_dir / f"{self.base}.sce"
+        # Subscribed online scenarios normally live only in Steam's read-only
+        # Workshop cache. Their generated variants still go to Scenarios.
+        return (self.s.find_base_sce(self.base)
+                or self.s.scenarios_dir / f"{self.base}.sce")
 
     def adaptive_sce_path(self) -> Path:
         return self.s.scenarios_dir / f"{self.adaptive_name}.sce"

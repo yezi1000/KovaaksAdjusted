@@ -8,6 +8,8 @@ import numpy as np
 
 from .movement import Flick
 
+NOTABLE_PER_KIND = 10
+
 
 @dataclass(slots=True)
 class NotableMoment:
@@ -26,11 +28,12 @@ def _fmt_dir(f: Flick) -> str:
 
 
 def find_notable_moments(
-    flicks: list[Flick], top_k: int = 3, pad: float = 1.0
+    flicks: list[Flick], top_k: int = NOTABLE_PER_KIND, pad: float = 1.0
 ) -> list[NotableMoment]:
     """Flag the most instructive moments: worst overshoots, worst hesitations
-    (correction chains), slowest flicks relative to amplitude, and the single
-    cleanest flick as a positive reference."""
+    (correction chains), misses without terminal control, slowest flicks
+    relative to amplitude, and clean flicks as positive references. Each
+    category contributes at most ``top_k`` independently."""
     if not flicks:
         return []
     out: list[NotableMoment] = []
@@ -87,14 +90,19 @@ def find_notable_moments(
                 f"Slow {_fmt_dir(f)} acquisition: {f.duration * 1000:.0f}ms for a "
                 f"{f.amplitude:.0f}-count flick (bottom 10% of this run's pace).")
 
-    # One clean reference flick
+    # Clean reference flicks. Keep the largest movements: they are the hardest
+    # clean executions to reproduce, and therefore the most useful positive
+    # comparison set. This category follows the same per-kind limit as every
+    # problem category instead of being silently hard-coded to one item.
     clean = [f for f in flicks
              if f.hit is not False and f.overshoot < 0.05 and f.corrections <= 1]
     if clean:
-        f = max(clean, key=lambda f: f.amplitude)
-        add(f, "clean_flick", 1.0,
-            f"Reference: a clean {f.amplitude:.0f}-count {_fmt_dir(f)} flick — "
-            f"{f.duration * 1000:.0f}ms, no overshoot. This is your benchmark.")
+        by_amplitude = sorted(clean, key=lambda f: f.amplitude, reverse=True)
+        largest = max(by_amplitude[0].amplitude, 1.0)
+        for f in by_amplitude[:top_k]:
+            add(f, "clean_flick", f.amplitude / largest,
+                f"Reference: a clean {f.amplitude:.0f}-count {_fmt_dir(f)} flick — "
+                f"{f.duration * 1000:.0f}ms, no overshoot. This is your benchmark.")
 
     out.sort(key=lambda m: m.severity, reverse=True)
     return out

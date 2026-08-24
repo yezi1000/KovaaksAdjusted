@@ -398,6 +398,28 @@ def test_selected_moment_and_replay_describe_the_same_segment(qapp, settings):
     view.deleteLater()
 
 
+def test_moment_rules_can_be_selected_independently(qapp, settings):
+    view = AnalysisView(settings)
+    view.show_report(_report(notable=[
+        {"kind": "overshoot", "text": "o", "click_index": 2,
+         "t_start": 1.0, "t_end": 2.0},
+        {"kind": "slow_flick", "text": "s", "click_index": 5,
+         "t_start": 3.0, "t_end": 4.0},
+        {"kind": "overshoot", "text": "o2", "click_index": 8,
+         "t_start": 5.0, "t_end": 6.0},
+    ]))
+    idx = view.moment_filter.findData("overshoot")
+    assert idx >= 0
+    view.moment_filter.setCurrentIndex(idx)
+    assert view.moments.count() == 2
+    assert [view._moment_index(i) for i in range(2)] == [0, 2]
+    assert all("第 " in view.moments.item(i).text() for i in range(2))
+    view.moment_filter.setCurrentIndex(view.moment_filter.findData("slow_flick"))
+    assert view.moments.count() == 1
+    assert view._moment_index(0) == 1
+    view.deleteLater()
+
+
 def test_a_run_without_telemetry_disables_the_whole_run_button(qapp, settings):
     view = AnalysisView(settings)
     view.show_report(_report(notable=[{"kind": "overshoot", "text": "x",

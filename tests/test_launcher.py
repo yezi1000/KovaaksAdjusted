@@ -79,6 +79,26 @@ def test_playlist_filename_sanitized(tmp_path):
     assert p.name == "a_b_c_.json"
 
 
+def test_read_local_playlists_preserves_order_and_skips_generated(tmp_path):
+    s, _root = make_settings(tmp_path)
+    s.playlists_dir.mkdir(parents=True)
+    user = {
+        "playlistName": "My routine",
+        "authorName": "player",
+        "scenarioList": [
+            {"scenario_name": "B", "play_Count": 2},
+            {"scenario_name": "A", "play_Count": "bad"},
+        ],
+    }
+    (s.playlists_dir / "mine.json").write_text(json.dumps(user), encoding="utf-8")
+    launcher.write_playlist(s, [("Generated", 1)])
+    (s.playlists_dir / "broken.json").write_text("{", encoding="utf-8")
+    got = launcher.read_local_playlists(s)
+    assert [(p.name, p.scenarios) for p in got] == [
+        ("My routine", (("B", 2), ("A", 1)))
+    ]
+
+
 # -------------------------------------------------------------- play_adaptive
 def test_play_adaptive_requires_variant(tmp_path):
     s, _root = make_settings(tmp_path)
