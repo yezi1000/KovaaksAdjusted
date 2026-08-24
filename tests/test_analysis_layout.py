@@ -1054,6 +1054,45 @@ def test_long_replay_drawing_is_capped_exactly_and_keeps_both_ends(
     replay.deleteLater()
 
 
+def test_visible_replay_flattens_static_vectors_but_keeps_shots_interactive(
+        qapp, settings):
+    from kovadapt.gui.replay import TrajectoryReplay
+
+    trace = (TraceBuilder(t0=1000.0)
+             .flick(240, 0, dur=0.20).click(0.01)
+             .flick(-240, 80, dur=0.20).click(0.01).build())
+    replay = TrajectoryReplay()
+    replay.resize(900, 560)
+    replay.show()
+    replay.load(trace)
+    qapp.processEvents()
+    replay._rebuild_static_cache()
+
+    assert replay._static_cache.isVisible()
+    assert not replay._static_cache.pixmap().isNull()
+    assert all(not curve.isVisible() for curve in replay._speed_curves)
+    assert replay._shots.isVisible(), "raster cache swallowed clickable shots"
+    assert [int(p.data()) for p in replay._shots.points()] == [1, 2, 3, 4]
+
+    # The cached viewport must cover exactly the current data view. This pins
+    # the y-axis translation: QRectF.top() is the minimum data y even though
+    # it is the bottom of the inverted on-screen axis.
+    mapped = replay._static_cache.transform().mapRect(
+        replay._static_cache.boundingRect())
+    current = replay.plot.getViewBox().viewRect()
+    assert mapped.left() == pytest.approx(current.left())
+    assert mapped.right() == pytest.approx(current.right())
+    assert mapped.top() == pytest.approx(current.top())
+    assert mapped.bottom() == pytest.approx(current.bottom())
+
+    replay.toggle_path.setChecked(False)
+    replay.toggle_flicks.setChecked(False)
+    replay._rebuild_static_cache()
+    assert not replay._static_cache.isVisible()
+    replay.hide()
+    replay.deleteLater()
+
+
 def test_no_view_widens_a_splitter_handle_past_what_the_theme_asked_for(qapp, settings):
     """`setHandleWidth(14)` for "room to breathe" did not add space — the theme
     FILLS a splitter handle with `pal.border`, so widening it produced a 14px

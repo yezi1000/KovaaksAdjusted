@@ -15,7 +15,9 @@ touching the item architecture — they only flip setVisible on the items.
 Lightweight by construction: the overlays are exactly two PlotCurveItems
 regardless of flick count (NaN-separated segments), the path is uniformly
 reduced to at most 50k points, and its colour bands are assembled with NumPy
-rather than a Python loop per segment. The QTimer only runs during playback.
+rather than a Python loop per segment. On a real desktop the plot gets its own
+OpenGL viewport; path and flick vectors are also raster-cached after range or
+theme changes, so playback does not redraw 50k antialiased segments per frame.
 The 125 Hz playhead moves one cached graphics item; the more expensive trail
 and slider refresh at 30 Hz. Playback time comes from QElapsedTimer, so speed
 is wall-clock accurate under load.
@@ -25,10 +27,11 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QElapsedTimer, Qt, QTimer
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QElapsedTimer, QRect, Qt, QTimer
+from PySide6.QtGui import QColor, QGuiApplication, QPixmap, QTransform
 from PySide6.QtWidgets import (
     QCheckBox,
+    QGraphicsPixmapItem,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -103,8 +106,20 @@ class TrajectoryReplay(QWidget):
         self._frame_seq = 0
         self._head_band = -1
         self._active_shot = -1
+        self._cache_building = False
+        self._gpu_checked = False
 
         self.plot = pg.PlotWidget()
+        # PlotCurveItem 0.14 has a native VBO path, but it is only selected
+        # when the GraphicsView owns an OpenGL viewport. Keep headless tests
+        # and remote/minimal Qt platforms on the software fallback.
+        platform = QGuiApplication.platformName().lower()
+        self._gpu_backend = platform not in {"offscreen", "minimal", "minimalegl"}
+        if self._gpu_backend:
+            try:
+                self.plot.useOpenGL(True)
+            except Exception:
+                self._gpu_backend = False
         self.plot.setAspectLocked(True)
         self.plot.hideAxis("bottom")
         self.plot.hideAxis("left")
@@ -118,6 +133,11 @@ class TrajectoryReplay(QWidget):
         self._good = self.plot.plot([], [], connect="finite")
         self._bad = self.plot.plot([], [], connect="finite")
         self._live = self.plot.plot([], [])
+        # Whole-run curves are static while the playhead moves. QGraphicsItem
+        # cache modes still replay the entire antialiased painter path (and
+        # benchmark worse here), so cache the composed pixels explicitly.
+        self._static_cache = QGraphicsPixmapItem()
+        self.plot.addItem(self._static_cache, ignoreBounds=True)
         # The head owns one cached spot at local (0, 0). Animation uses
         # QGraphicsItem.setPos(), avoiding ScatterPlotItem.setData() and its
         # per-frame data/bounds/cache rebuild.
@@ -134,6 +154,8 @@ class TrajectoryReplay(QWidget):
         self._bad.setZValue(1)
         for curve in self._speed_curves:
             curve.setZValue(2)
+        self._static_cache.setZValue(2)
+        self._static_cache.hide()
         self._live.setZValue(3)
         self._head.setZValue(4)
         self._shots.setZValue(4)
@@ -189,6 +211,12 @@ class TrajectoryReplay(QWidget):
         self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setInterval(_PLAYHEAD_INTERVAL_MS)
         self._timer.timeout.connect(self._tick)
+        self._cache_timer = QTimer(self)
+        self._cache_timer.setSingleShot(True)
+        self._cache_timer.setInterval(40)
+        self._cache_timer.timeout.connect(self._rebuild_static_cache)
+        self.plot.getViewBox().sigRangeChanged.connect(
+            self._schedule_static_cache)
         self.restyle()
 
     # ------------------------------------------------------------------
@@ -223,6 +251,8 @@ class TrajectoryReplay(QWidget):
         self._shots.setPen(pg.mkPen(pal.bad, width=2))
         self._shot_label.setColor(QColor(pal.fg))
         self._update_legend()
+        if hasattr(self, "_cache_timer"):
+            self._schedule_static_cache()
 
     def _color_for_speed(self, value: float) -> QColor:
         """Palette-aware speed-band colour for the playhead."""
@@ -260,17 +290,115 @@ class TrajectoryReplay(QWidget):
     # ------------------------------------------------------------------
     def _set_flicks_visible(self, on: bool) -> None:
         """One toggle drives both flick overlays (they are a single layer)."""
-        self._good.setVisible(on)
-        self._bad.setVisible(on)
+        if self._t.size and self._static_cache.isVisible():
+            self._schedule_static_cache()
+        else:
+            self._good.setVisible(on)
+            self._bad.setVisible(on)
 
     def _set_path_visible(self, on: bool) -> None:
-        self._full.setVisible(on)
-        for curve in self._speed_curves:
-            curve.setVisible(on)
+        if self._t.size and self._static_cache.isVisible():
+            self._schedule_static_cache()
+        else:
+            self._full.setVisible(on)
+            for curve in self._speed_curves:
+                curve.setVisible(on)
 
     def _set_shots_visible(self, on: bool) -> None:
         self._shots.setVisible(on)
         self._shot_label.setVisible(on and self._active_shot >= 0)
+
+    def _drop_static_cache(self) -> None:
+        """Return to vectors while data/range/style is being replaced."""
+        self._cache_timer.stop()
+        self._static_cache.hide()
+        self._static_cache.setPixmap(QPixmap())
+        self._full.setVisible(self.toggle_path.isChecked())
+        for curve in self._speed_curves:
+            curve.setVisible(self.toggle_path.isChecked())
+        self._good.setVisible(self.toggle_flicks.isChecked())
+        self._bad.setVisible(self.toggle_flicks.isChecked())
+
+    def _schedule_static_cache(self, *_args) -> None:
+        """Debounce resize/range/theme changes into one cache rebuild."""
+        if self._t.size and self.isVisible() and not self._cache_building:
+            self._cache_timer.start()
+
+    def _rebuild_static_cache(self) -> None:
+        """Compose static path/flick vectors once at the current view range.
+
+        Click markers stay as a real ScatterPlotItem so hover/click numbering
+        remains interactive. Only the expensive, immutable vector layers are
+        flattened; the playhead and short trail continue to use data coords.
+        """
+        if self._cache_building or not self._t.size or not self.isVisible():
+            return
+        path_on = self.toggle_path.isChecked()
+        flicks_on = self.toggle_flicks.isChecked()
+        if not path_on and not flicks_on:
+            self._drop_static_cache()
+            self._full.hide()
+            for curve in self._speed_curves:
+                curve.hide()
+            self._good.hide()
+            self._bad.hide()
+            return
+
+        self._cache_building = True
+        try:
+            self._static_cache.hide()
+            self._full.setVisible(path_on)
+            for curve in self._speed_curves:
+                curve.setVisible(path_on)
+            self._good.setVisible(flicks_on)
+            self._bad.setVisible(flicks_on)
+
+            dynamic = (self._live, self._head, self._shots, self._shot_label)
+            dynamic_visible = [item.isVisible() for item in dynamic]
+            try:
+                for item in dynamic:
+                    item.hide()
+
+                vb = self.plot.getViewBox()
+                scene_rect = vb.sceneBoundingRect()
+                top_left = self.plot.mapFromScene(scene_rect.topLeft())
+                bottom_right = self.plot.mapFromScene(scene_rect.bottomRight())
+                crop = QRect(top_left, bottom_right).normalized().intersected(
+                    self.plot.viewport().rect())
+                pixmap = (self.plot.viewport().grab(crop)
+                          if crop.width() > 1 and crop.height() > 1 else QPixmap())
+            finally:
+                for item, visible in zip(dynamic, dynamic_visible):
+                    item.setVisible(visible)
+            self._full.hide()
+            for curve in self._speed_curves:
+                curve.hide()
+            self._good.hide()
+            self._bad.hide()
+
+            if pixmap.isNull():
+                # Capturing an unsupported OpenGL/remote viewport can fail.
+                # Leave the correct vector rendering in place rather than a
+                # fast blank canvas.
+                self._full.setVisible(path_on)
+                for curve in self._speed_curves:
+                    curve.setVisible(path_on)
+                self._good.setVisible(flicks_on)
+                self._bad.setVisible(flicks_on)
+                return
+
+            self._static_cache.setPixmap(pixmap)
+            bounds = self._static_cache.boundingRect()
+            view = vb.viewRect()
+            if bounds.width() <= 0 or bounds.height() <= 0:
+                return
+            sx = view.width() / bounds.width()
+            sy = view.height() / bounds.height()
+            self._static_cache.setTransform(QTransform(
+                sx, 0.0, 0.0, -sy, view.left(), view.bottom()))
+            self._static_cache.show()
+        finally:
+            self._cache_building = False
 
     # ------------------------------------------------------------------
     def load(self, trace: MouseTrace, t0: float | None = None,
@@ -281,6 +409,7 @@ class TrajectoryReplay(QWidget):
         analysis.movement.Flick objects for the SAME trace (absolute epoch
         times); the ones inside the window become quality overlays."""
         self.stop()
+        self._drop_static_cache()
         seg = trace if t0 is None else trace.window(t0, t1 if t1 is not None else trace.t[-1])
         # A uniform grid represents rest as zero speed. Raw packet timestamps
         # contain no samples while the hand is still, so differentiating the
@@ -354,6 +483,7 @@ class TrajectoryReplay(QWidget):
         self.scrub.setValue(0)
         self.info.setText(label or f"{self._t[-1]:.2f} 秒 · {seg.clicks.size} 次射击")
         self.plot.autoRange()
+        self._schedule_static_cache()
         self._sync_transport()
 
     def _clear_clicks(self) -> None:
@@ -439,6 +569,7 @@ class TrajectoryReplay(QWidget):
         """Empty the plot (used when a report arrives without telemetry, so
         the previous run's path can't masquerade as the current one)."""
         self.stop()
+        self._drop_static_cache()
         self._t = np.empty(0)
         self._point_speed = np.empty(0)
         self._clear_clicks()
@@ -451,6 +582,31 @@ class TrajectoryReplay(QWidget):
         self.info.setText(message)
         self._update_legend()
         self._sync_transport()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._gpu_backend and not self._gpu_checked:
+            # QOpenGLWidget obtains its context only after its first paint.
+            # A delayed validation gives remote desktop / broken-driver
+            # sessions a clean software fallback instead of a black canvas.
+            QTimer.singleShot(100, self._validate_gpu_viewport)
+        self._schedule_static_cache()
+
+    def _validate_gpu_viewport(self) -> None:
+        if not self._gpu_backend or not self.isVisible():
+            return
+        viewport = self.plot.viewport()
+        valid = getattr(viewport, "isValid", None)
+        if callable(valid) and not valid():
+            self.plot.useOpenGL(False)
+            self._gpu_backend = False
+            self._drop_static_cache()
+            self._schedule_static_cache()
+        self._gpu_checked = True
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._schedule_static_cache()
 
     def _sync_transport(self) -> None:
         """Enable the transport only when there is something to transport.
